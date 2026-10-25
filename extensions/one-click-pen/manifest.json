@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Infinity Pen - One-Click Screen Inking",
+  "version": "1.0.0",
+  "description": "One-click to pen: Draw, annotate, sketch, and highlight directly on any website with pen tablet pressure sensitivity.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Infinity Pen (Alt+P to toggle)"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "commands": {
+    "toggle-pen": {
+      "suggested_key": {
+        "default": "Alt+P",
+        "mac": "Alt+P"
+      },
+      "description": "Toggle One-Click Pen Overlay"
+    }
+  }
+}
