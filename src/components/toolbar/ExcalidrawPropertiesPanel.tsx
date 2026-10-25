@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ToolType,
   PenConfig,
@@ -184,6 +184,10 @@ export const ExcalidrawPropertiesPanel: React.FC<ExcalidrawPropertiesPanelProps>
 }) => {
   const [activeTab, setActiveTab] = useState<'style' | 'brushes'>('style');
   const [hexInput, setHexInput] = useState(activePen.color);
+
+  useEffect(() => {
+    setHexInput(activePen.color);
+  }, [activePen.color]);
 
   const selectedSticky = selectedObject?.type === 'sticky' ? (selectedObject as StickyNoteObject) : null;
   const selectedText = selectedObject?.type === 'text' ? (selectedObject as TextObject) : null;
