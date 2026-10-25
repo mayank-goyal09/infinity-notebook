@@ -285,6 +285,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   onChangeCanvasBg,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const docCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -528,35 +529,50 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
   // Render Document & Overlay Scene
   const renderScene = useCallback(() => {
+    const bgCanvas = bgCanvasRef.current;
     const docCanvas = docCanvasRef.current;
     const overlayCanvas = overlayCanvasRef.current;
     if (!docCanvas || !overlayCanvas) return;
+
+    const camera = cameraEngineRef.current.getState();
+
+    // Layer 0: Background Canvas (Fill, spreadsheet grid lines, and page frames)
+    if (bgCanvas) {
+      const bgCtx = bgCanvas.getContext('2d');
+      if (bgCtx) {
+        rendererRef.current.renderBackground(
+          bgCtx,
+          bgCanvas.width,
+          bgCanvas.height,
+          camera,
+          doc.pages,
+          doc.currentMode,
+          theme,
+          canvasBg
+        );
+      }
+    }
 
     const docCtx = docCanvas.getContext('2d');
     const overlayCtx = overlayCanvas.getContext('2d');
     if (!docCtx || !overlayCtx) return;
 
     const t0 = performance.now();
-    const camera = cameraEngineRef.current.getState();
 
-    // Render persistent document layer (using active in-memory objects during eraser drag for 120 FPS!)
+    // Layer 2: Transparent Document Objects Canvas (Strokes, shapes, text, images - excludes tables rendered by Layer 1 HTML overlay)
     const pending = pendingCommittedStrokeRef.current;
     if (pending && doc.objects.some((o) => o.id === pending.id)) {
       pendingCommittedStrokeRef.current = null;
     }
     const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || doc.objects;
-    // Exclude the actively edited text/sticky/table from canvas to prevent collision with active HTML editor
-    const activeEditingTableId = activeTool === 'select' ? selectedTableId : null;
-    const objectsWithoutEditing = baseObjects.filter((o) => {
-      if (editingTextObj && o.id === editingTextObj.id) return false;
-      if (editingStickyObj && o.id === editingStickyObj.id) return false;
-      if (activeEditingTableId && o.id === activeEditingTableId) return false;
-      return true;
-    });
+    const objectsWithoutEditing = editingTextObj
+      ? baseObjects.filter((o) => o.id !== editingTextObj.id)
+      : (editingStickyObj ? baseObjects.filter((o) => o.id !== editingStickyObj.id) : baseObjects);
     const objectsToRender =
       pending && !objectsWithoutEditing.some((o) => o.id === pending.id)
         ? [...objectsWithoutEditing, pending]
         : objectsWithoutEditing;
+    const canvasObjectsToRender = objectsToRender.filter((o) => o.type !== 'table');
 
     const renderedCount = rendererRef.current.renderDocument(
       docCtx,
@@ -564,10 +580,11 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       docCanvas.height,
       camera,
       doc.pages,
-      objectsToRender,
+      canvasObjectsToRender,
       doc.currentMode,
       theme,
-      canvasBg
+      canvasBg,
+      true // skipBackground = true (100% transparent so sketches appear ON TOP of Layer 1 tables!)
     );
 
     // Suppress selection bounding box over text when actively editing it
@@ -620,40 +637,56 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     if (docRedrawRafRef.current !== null) return;
     docRedrawRafRef.current = requestAnimationFrame(() => {
       docRedrawRafRef.current = null;
+      const bgCanvas = bgCanvasRef.current;
       const docCanvas = docCanvasRef.current;
       if (!docCanvas) return;
+      const camera = cameraEngineRef.current.getState();
+
+      if (bgCanvas) {
+        const bgCtx = bgCanvas.getContext('2d');
+        if (bgCtx) {
+          rendererRef.current.renderBackground(
+            bgCtx,
+            bgCanvas.width,
+            bgCanvas.height,
+            camera,
+            doc.pages,
+            doc.currentMode,
+            theme,
+            canvasBg
+          );
+        }
+      }
+
       const docCtx = docCanvas.getContext('2d');
       if (!docCtx) return;
-      const camera = cameraEngineRef.current.getState();
       const pending = pendingCommittedStrokeRef.current;
       if (pending && doc.objects.some((o) => o.id === pending.id)) {
         pendingCommittedStrokeRef.current = null;
       }
       const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || doc.objects;
-      const activeEditingTableId = activeTool === 'select' ? selectedTableId : null;
-      const objectsWithoutEditing = baseObjects.filter((o) => {
-        if (editingTextObj && o.id === editingTextObj.id) return false;
-        if (editingStickyObj && o.id === editingStickyObj.id) return false;
-        if (activeEditingTableId && o.id === activeEditingTableId) return false;
-        return true;
-      });
+      const objectsWithoutEditing = editingTextObj
+        ? baseObjects.filter((o) => o.id !== editingTextObj.id)
+        : (editingStickyObj ? baseObjects.filter((o) => o.id !== editingStickyObj.id) : baseObjects);
       const objectsToRender =
         pending && !objectsWithoutEditing.some((o) => o.id === pending.id)
           ? [...objectsWithoutEditing, pending]
           : objectsWithoutEditing;
+      const canvasObjectsToRender = objectsToRender.filter((o) => o.type !== 'table');
       rendererRef.current.renderDocument(
         docCtx,
         docCanvas.width,
         docCanvas.height,
         camera,
         doc.pages,
-        objectsToRender,
+        canvasObjectsToRender,
         doc.currentMode,
         theme,
-        canvasBg
+        canvasBg,
+        true // skipBackground = true
       );
     });
-  }, [doc.pages, doc.objects, doc.currentMode, theme, canvasBg, editingTextObj, editingStickyObj, selectedTableId, activeTool]);
+  }, [doc.pages, doc.objects, doc.currentMode, theme, canvasBg, editingTextObj, editingStickyObj]);
 
   // Window & Container Resize Listener (Live observer updates canvas dimensions simultaneously)
   useEffect(() => {
@@ -668,6 +701,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       if (w === 0 || h === 0) return;
 
       let changed = false;
+      const bgCanvas = bgCanvasRef.current;
+      if (bgCanvas && (bgCanvas.width !== w || bgCanvas.height !== h)) {
+        bgCanvas.width = w;
+        bgCanvas.height = h;
+        changed = true;
+      }
       if (docCanvas.width !== w || docCanvas.height !== h) {
         docCanvas.width = w;
         docCanvas.height = h;
@@ -1692,9 +1731,6 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       if (selection.selectedIds.length > 0) {
         onSelectIds?.([]);
         setSelection({ selectedIds: [], bounds: null, mode: 'idle' });
-      }
-      if (selectedTableId) {
-        onSelectTable?.(null);
       }
       handleStartInking(docPt.x, docPt.y, e.pressure);
       return;
@@ -3448,11 +3484,11 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           : 'cursor-default'
       }`}
     >
-      {/* Layer 0: Interactive Accounting Tables (Active in select mode when table is selected) */}
-      {activeTool === 'select' &&
-        allTableObjects
-          .filter((t) => t.id === selectedTableId)
-          .map((tableObj) => {
+      {/* Layer 0: Background Canvas (z-0: Theme canvas color, infinite grid, page frames) */}
+      <canvas ref={bgCanvasRef} className="absolute inset-0 block pointer-events-none z-0" />
+
+      {/* Layer 1: Interactive Accounting Tables (z-5: rendered on top of background/grid, beneath transparent ink canvas) */}
+      {allTableObjects.map((tableObj) => {
         const liveTable =
           (activeDragObjectsRef.current?.find((o) => o.id === tableObj.id) as AccountingTableObject) ||
           tableObj;
@@ -3476,10 +3512,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         );
       })}
 
-      {/* Layer 1: Persistent Document Canvas */}
+      {/* Layer 2: Transparent Document Objects Canvas (z-10: Sketches, strokes, shapes rendered directly ON TOP of tables) */}
       <canvas ref={docCanvasRef} className="absolute inset-0 block pointer-events-none z-10" />
 
-      {/* Layer 2: Fast Overlay Canvas (<16ms latency) */}
+      {/* Layer 3: Fast Overlay Canvas (z-20: Live ink, laser, selection handles) */}
       <canvas ref={overlayCanvasRef} className="absolute inset-0 block pointer-events-none z-20" />
 
       {/* Drag-and-drop Ghost Preview */}
