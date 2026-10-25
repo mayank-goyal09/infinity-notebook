@@ -89,6 +89,48 @@ export class CanvasRenderer {
   /**
    * Render Document Layer (Pages, Backgrounds, Objects)
    */
+  /**
+   * Render Background Layer (Viewport background, infinite grid, page frames)
+   */
+  public renderBackground(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    camera: CameraState,
+    pages: PageFrame[],
+    currentMode: 'notebook' | 'canvas',
+    theme: 'light' | 'dark' | 'paper',
+    customBgColor?: string
+  ) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.clearRect(0, 0, width, height);
+
+    const canvasBg =
+      customBgColor || (theme === 'dark' ? '#09090b' : '#f8fafc');
+    ctx.fillStyle = canvasBg;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.translate(camera.x, camera.y);
+    ctx.scale(camera.zoom, camera.zoom);
+
+    const visibleRect = this.getVisibleDocRect(camera, width, height);
+
+    this.renderInfiniteSpreadsheetGrid(ctx, visibleRect, theme);
+
+    for (const page of pages) {
+      if (this.intersects(visibleRect, page)) {
+        this.renderPageBackground(ctx, page, theme, currentMode);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Render Document Layer (Pages, Backgrounds, Objects)
+   */
   public renderDocument(
     ctx: CanvasRenderingContext2D,
     width: number,
@@ -98,42 +140,46 @@ export class CanvasRenderer {
     objects: CanvasObject[],
     currentMode: 'notebook' | 'canvas',
     theme: 'light' | 'dark' | 'paper',
-    customBgColor?: string
+    customBgColor?: string,
+    skipBackground = false
   ): number {
     ctx.save();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    // Clear viewport with theme canvas color
     ctx.clearRect(0, 0, width, height);
 
-    const canvasBg =
-      customBgColor || (theme === 'dark' ? '#09090b' : '#f8fafc');
-    ctx.fillStyle = canvasBg;
-    ctx.fillRect(0, 0, width, height);
+    if (!skipBackground) {
+      const canvasBg =
+        customBgColor || (theme === 'dark' ? '#09090b' : '#f8fafc');
+      ctx.fillStyle = canvasBg;
+      ctx.fillRect(0, 0, width, height);
+    }
 
-    // Apply camera transform
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.zoom, camera.zoom);
 
     const visibleRect = this.getVisibleDocRect(camera, width, height);
 
-    // Render clean infinite spreadsheet grid lines
-    this.renderInfiniteSpreadsheetGrid(ctx, visibleRect, theme);
+    if (!skipBackground) {
+      this.renderInfiniteSpreadsheetGrid(ctx, visibleRect, theme);
 
-    let renderedCount = 0;
-
-    // 1. Draw Pages / Frames
-    for (const page of pages) {
-      if (this.intersects(visibleRect, page)) {
-        this.renderPageBackground(ctx, page, theme, currentMode);
+      for (const page of pages) {
+        if (this.intersects(visibleRect, page)) {
+          this.renderPageBackground(ctx, page, theme, currentMode);
+        }
       }
     }
 
-    // 2. Render Objects with Spatial Culling
+    let renderedCount = 0;
+
     for (const obj of objects) {
       if (this.intersects(visibleRect, obj)) {
-        this.renderObject(ctx, obj, camera.zoom, theme);
-        renderedCount++;
+        try {
+          this.renderObject(ctx, obj, camera.zoom, theme);
+          renderedCount++;
+        } catch (err) {
+          console.warn('Error rendering object:', obj?.id, err);
+        }
       }
     }
 
@@ -450,18 +496,37 @@ export class CanvasRenderer {
     _zoom: number,
     theme: 'light' | 'dark' | 'paper'
   ) {
-    ctx.save();
-    const { x, y, columns, rows, title, showBalancedIndicator, currencySymbol = '$' } = table;
-    const isDark = theme === 'dark';
+    if (!table) return;
+    try {
+      ctx.save();
+      const {
+        x = 0,
+        y = 0,
+        columns = [],
+        rows = [],
+        title,
+        showBalancedIndicator,
+        currencySymbol = '$',
+      } = table;
+      const isDark = theme === 'dark';
 
-    const headerHeight = table.headerHeight || 36;
-    const rowHeight = table.rowHeight || 32;
-    const titleBarHeight = 32;
-    const baseFontSize = table.fontSize || 12;
+      const headerHeight = table.headerHeight || 36;
+      const rowHeight = table.rowHeight || 32;
+      const titleBarHeight = 32;
+      const baseFontSize = table.fontSize || 12;
 
-    const totalWidth = columns.reduce((acc, c) => acc + c.width, 0);
-    const rowsHeight = rows.reduce((acc, r) => acc + (r.height || rowHeight), 0);
-    const totalHeight = titleBarHeight + headerHeight + rowsHeight;
+      const safeCols = Array.isArray(columns) ? columns : [];
+      const safeRows = Array.isArray(rows) ? rows : [];
+
+      const totalWidth =
+        safeCols.length > 0
+          ? safeCols.reduce((acc, c) => acc + (c?.width || 100), 0)
+          : (table.width || 600);
+      const rowsHeight =
+        safeRows.length > 0
+          ? safeRows.reduce((acc, r) => acc + (r?.height || rowHeight), 0)
+          : 0;
+      const totalHeight = titleBarHeight + headerHeight + rowsHeight;
 
     // Table container shadow and background card
     ctx.shadowColor = isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(15, 23, 42, 0.08)';
@@ -562,7 +627,7 @@ export class CanvasRenderer {
     ctx.fillStyle = table.headerTextColor || defaultTextColor;
     ctx.font = `600 ${Math.max(10, Math.round(baseFontSize * 0.95))}px Inter, -apple-system, sans-serif`;
 
-    columns.forEach((col, idx) => {
+    safeCols.forEach((col, idx) => {
       let textX = curX + 8;
       if (col.align === 'center') textX = curX + col.width / 2;
       else if (col.align === 'right') textX = curX + col.width - 8;
@@ -631,8 +696,8 @@ export class CanvasRenderer {
       }
 
       let cellX = x;
-      columns.forEach((col, idx) => {
-        const cell = row.cells[col.id];
+      safeCols.forEach((col, idx) => {
+        const cell = row?.cells ? row.cells[col.id] : undefined;
         if (cell) {
           ctx.fillStyle =
             cell.textColor ||
@@ -684,7 +749,11 @@ export class CanvasRenderer {
       rowY += currentRowHeight;
     });
 
-    ctx.restore();
+      ctx.restore();
+    } catch (err) {
+      console.warn('renderAccountingTable error:', err);
+      try { ctx.restore(); } catch {}
+    }
   }
 
   // ============================================================================
