@@ -269,7 +269,7 @@ export default function App() {
     if (recordHistory) {
       const newHistory = history.slice(0, historyIndex + 1);
       newHistory.push(newDoc);
-      if (newHistory.length > 30) newHistory.shift(); // Limit to 30 states to avoid heap bloat
+      if (newHistory.length > 50) newHistory.shift(); // Limit to 50 states
       setHistory(newHistory);
       setHistoryIndex(newHistory.length - 1);
     }
