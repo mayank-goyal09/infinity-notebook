@@ -553,13 +553,16 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       pending && !objectsWithoutEditing.some((o) => o.id === pending.id)
         ? [...objectsWithoutEditing, pending]
         : objectsWithoutEditing;
+    // Exclude accounting tables from canvas layer to prevent duplicate ghost tables behind interactive overlay
+    const canvasObjectsToRender = objectsToRender.filter((o) => o.type !== 'table');
+
     const renderedCount = rendererRef.current.renderDocument(
       docCtx,
       docCanvas.width,
       docCanvas.height,
       camera,
       doc.pages,
-      objectsToRender,
+      canvasObjectsToRender,
       doc.currentMode,
       theme,
       canvasBg
@@ -632,13 +635,14 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         pending && !objectsWithoutEditing.some((o) => o.id === pending.id)
           ? [...objectsWithoutEditing, pending]
           : objectsWithoutEditing;
+      const canvasObjectsToRender = objectsToRender.filter((o) => o.type !== 'table');
       rendererRef.current.renderDocument(
         docCtx,
         docCanvas.width,
         docCanvas.height,
         camera,
         doc.pages,
-        objectsToRender,
+        canvasObjectsToRender,
         doc.currentMode,
         theme,
         canvasBg
