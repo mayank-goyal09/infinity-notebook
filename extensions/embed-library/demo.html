@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Infinity Notebook Embed & One-Click Demo</title>
+  <link rel="stylesheet" href="infinity-notebook-embed.css">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      margin: 0;
+      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .wrapper {
+      max-width: 900px;
+      width: 100%;
+    }
+    header {
+      margin-bottom: 28px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 800;
+      margin: 0 0 8px 0;
+      background: linear-gradient(135deg, #1e293b, #3b82f6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p {
+      color: #64748b;
+      margin: 0 0 16px 0;
+      line-height: 1.6;
+    }
+    .badge {
+      display: inline-block;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+      border: 1px solid #e2e8f0;
+      margin-bottom: 32px;
+    }
+    #embedded-notebook {
+      width: 100%;
+      height: 480px;
+      margin-top: 14px;
+    }
+    .code-box {
+      background: #0f172a;
+      color: #38bdf8;
+      padding: 14px 18px;
+      border-radius: 10px;
+      font-family: monospace;
+      font-size: 13px;
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <header>
+      <span class="badge">✨ Standalone Embed Library</span>
+      <h1>Infinity Notebook: 1-Click & Embed Showcase</h1>
+      <p>Demonstrating how to embed an interactive whiteboard on any website, or trigger a 1-click floating screen-inking pen anywhere.</p>
+    </header>
+
+    <!-- Section 1: Embedded Whiteboard Container -->
+    <div class="card">
+      <h2 style="font-size: 18px; margin: 0 0 6px 0;">Method 1: Embedded Notebook Canvas</h2>
+      <p style="font-size: 13px;">Embed an interactive inking notebook right inside any webpage, blog post, or learning dashboard:</p>
+      
+      <!-- Container where notebook will mount -->
+      <div id="embedded-notebook"></div>
+
+      <div style="margin-top: 18px;">
+        <p style="font-size: 12px; font-weight: 600; margin-bottom: 4px; color: #475569;">Embedding Code:</p>
+        <div class="code-box">
+&lt;div id="my-notebook" style="height: 500px;"&gt;&lt;/div&gt;
+&lt;script src="infinity-notebook-embed.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  const notebook = new InfinityNotebookEmbed({
+    container: '#my-notebook',
+    theme: 'light',
+    pressureSensitivity: true
+  });
+&lt;/script&gt;
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 2: One-Click Floating Screen Pen -->
+    <div class="card">
+      <h2 style="font-size: 18px; margin: 0 0 6px 0;">Method 2: One-Click Floating Screen Pen</h2>
+      <p style="font-size: 13px;">Notice the floating blue pen button in the <b>bottom-right corner</b> of this page! Click it (or press <b>Alt+P</b>) to turn this entire website into an inking canvas.</p>
+      
+      <div class="code-box">
+&lt;script src="infinity-notebook-embed.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  // Adds 1-click floating pen to your whole website:
+  InfinityNotebookEmbed.initScreenWidget();
+&lt;/script&gt;
+      </div>
+    </div>
+  </div>
+
+  <!-- Include the library -->
+  <script src="infinity-notebook-embed.js"></script>
+  <script>
+    // 1. Initialize embedded notebook inside #embedded-notebook
+    const notebook = new InfinityNotebookEmbed({
+      container: '#embedded-notebook',
+      theme: 'light',
+      showToolbar: true,
+      pressureSensitivity: true
+    });
+
+    // 2. Initialize 1-click floating screen-inking widget for the whole page
+    InfinityNotebookEmbed.initScreenWidget({
+      theme: 'light'
+    });
+  </script>
+</body>
+</html>
