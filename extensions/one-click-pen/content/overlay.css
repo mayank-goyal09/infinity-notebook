@@ -1,0 +1,158 @@
+/* Infinity Pen Screen Inking Overlay CSS */
+
+#infinity-pen-root {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 2147483640;
+  pointer-events: auto;
+  user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+}
+
+#infinity-pen-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* Floating Apple Glassmorphism Toolbar */
+#infinity-pen-toolbar {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  padding: 6px 10px;
+  z-index: 2147483647;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  #infinity-pen-toolbar {
+    background: rgba(24, 24, 27, 0.88);
+    border-color: rgba(63, 63, 70, 0.7);
+    box-shadow: 0 12px 35px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+}
+
+.ip-drag-handle {
+  cursor: grab;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+}
+.ip-drag-handle:active {
+  cursor: grabbing;
+}
+
+.ip-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ip-divider {
+  width: 1px;
+  height: 18px;
+  background: rgba(148, 163, 184, 0.3);
+  margin: 0 2px;
+}
+
+.ip-btn {
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #475569;
+  transition: all 0.12s ease;
+  position: relative;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ip-btn {
+    color: #cbd5e1;
+  }
+}
+
+.ip-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #0f172a;
+}
+@media (prefers-color-scheme: dark) {
+  .ip-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+  }
+}
+
+.ip-btn.active {
+  background: #2563eb;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
+}
+
+.ip-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.ip-color-swatch:hover {
+  transform: scale(1.15);
+}
+.ip-color-swatch.active {
+  transform: scale(1.22);
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.ip-close-btn {
+  color: #ef4444;
+}
+.ip-close-btn:hover {
+  background: rgba(239, 68, 68, 0.12) !important;
+  color: #dc2626 !important;
+}
+
+/* Tooltip hint */
+.ip-hint {
+  position: absolute;
+  bottom: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.85);
+  color: white;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+#infinity-pen-toolbar:hover .ip-hint {
+  opacity: 1;
+}
