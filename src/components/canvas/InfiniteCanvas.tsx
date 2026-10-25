@@ -545,16 +545,18 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       pendingCommittedStrokeRef.current = null;
     }
     const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || doc.objects;
-    // Exclude the actively edited text/sticky from canvas to prevent double-text collision/ghosting
-    const objectsWithoutEditing = editingTextObj
-      ? baseObjects.filter((o) => o.id !== editingTextObj.id)
-      : (editingStickyObj ? baseObjects.filter((o) => o.id !== editingStickyObj.id) : baseObjects);
+    // Exclude the actively edited text/sticky/table from canvas to prevent collision with active HTML editor
+    const activeEditingTableId = activeTool === 'select' ? selectedTableId : null;
+    const objectsWithoutEditing = baseObjects.filter((o) => {
+      if (editingTextObj && o.id === editingTextObj.id) return false;
+      if (editingStickyObj && o.id === editingStickyObj.id) return false;
+      if (activeEditingTableId && o.id === activeEditingTableId) return false;
+      return true;
+    });
     const objectsToRender =
       pending && !objectsWithoutEditing.some((o) => o.id === pending.id)
         ? [...objectsWithoutEditing, pending]
         : objectsWithoutEditing;
-    // Exclude accounting tables from canvas layer to prevent duplicate ghost tables behind interactive overlay
-    const canvasObjectsToRender = objectsToRender.filter((o) => o.type !== 'table');
 
     const renderedCount = rendererRef.current.renderDocument(
       docCtx,
@@ -562,7 +564,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       docCanvas.height,
       camera,
       doc.pages,
-      canvasObjectsToRender,
+      objectsToRender,
       doc.currentMode,
       theme,
       canvasBg
@@ -611,7 +613,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         mode: doc.currentMode,
       });
     }
-  }, [doc, theme, canvasBg, selection, clickToInkState, activeTool, onStatsUpdate, eraserSize, editingTextObj, editingStickyObj]);
+  }, [doc, theme, canvasBg, selection, clickToInkState, activeTool, onStatsUpdate, eraserSize, editingTextObj, editingStickyObj, selectedTableId]);
 
   // Ultra-fast document redraw throttled by requestAnimationFrame (120 FPS max 1 redraw per frame)
   const scheduleDocRedraw = useCallback(() => {
@@ -628,27 +630,30 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         pendingCommittedStrokeRef.current = null;
       }
       const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || doc.objects;
-      const objectsWithoutEditing = editingTextObj
-        ? baseObjects.filter((o) => o.id !== editingTextObj.id)
-        : (editingStickyObj ? baseObjects.filter((o) => o.id !== editingStickyObj.id) : baseObjects);
+      const activeEditingTableId = activeTool === 'select' ? selectedTableId : null;
+      const objectsWithoutEditing = baseObjects.filter((o) => {
+        if (editingTextObj && o.id === editingTextObj.id) return false;
+        if (editingStickyObj && o.id === editingStickyObj.id) return false;
+        if (activeEditingTableId && o.id === activeEditingTableId) return false;
+        return true;
+      });
       const objectsToRender =
         pending && !objectsWithoutEditing.some((o) => o.id === pending.id)
           ? [...objectsWithoutEditing, pending]
           : objectsWithoutEditing;
-      const canvasObjectsToRender = objectsToRender.filter((o) => o.type !== 'table');
       rendererRef.current.renderDocument(
         docCtx,
         docCanvas.width,
         docCanvas.height,
         camera,
         doc.pages,
-        canvasObjectsToRender,
+        objectsToRender,
         doc.currentMode,
         theme,
         canvasBg
       );
     });
-  }, [doc.pages, doc.objects, doc.currentMode, theme, canvasBg, editingTextObj, editingStickyObj]);
+  }, [doc.pages, doc.objects, doc.currentMode, theme, canvasBg, editingTextObj, editingStickyObj, selectedTableId, activeTool]);
 
   // Window & Container Resize Listener (Live observer updates canvas dimensions simultaneously)
   useEffect(() => {
@@ -1687,6 +1692,9 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       if (selection.selectedIds.length > 0) {
         onSelectIds?.([]);
         setSelection({ selectedIds: [], bounds: null, mode: 'idle' });
+      }
+      if (selectedTableId) {
+        onSelectTable?.(null);
       }
       handleStartInking(docPt.x, docPt.y, e.pressure);
       return;
@@ -3440,8 +3448,11 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           : 'cursor-default'
       }`}
     >
-      {/* Layer 0: Interactive Accounting Tables */}
-      {allTableObjects.map((tableObj) => {
+      {/* Layer 0: Interactive Accounting Tables (Active in select mode when table is selected) */}
+      {activeTool === 'select' &&
+        allTableObjects
+          .filter((t) => t.id === selectedTableId)
+          .map((tableObj) => {
         const liveTable =
           (activeDragObjectsRef.current?.find((o) => o.id === tableObj.id) as AccountingTableObject) ||
           tableObj;
