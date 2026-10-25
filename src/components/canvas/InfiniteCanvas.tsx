@@ -631,32 +631,20 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [renderScene]);
 
-  // On-demand Laser Pointer Decay Animation (Zero idle CPU drain, overlay-only)
-  const laserRafRef = useRef<number | null>(null);
-  const startLaserDecayIfNeeded = useCallback(() => {
-    if (laserRafRef.current !== null) return;
+  // Continuous Laser Pointer Decay Animation
+  useEffect(() => {
+    let animId: number;
     const tick = () => {
       if (laserTrailRef.current.length > 0) {
         const now = performance.now();
         laserTrailRef.current = laserTrailRef.current.filter((pt) => now - pt.time < 850);
-        renderOverlayOnly();
-        laserRafRef.current = requestAnimationFrame(tick);
-      } else {
-        laserRafRef.current = null;
-        renderOverlayOnly();
+        renderScene();
       }
+      animId = requestAnimationFrame(tick);
     };
-    laserRafRef.current = requestAnimationFrame(tick);
-  }, [renderOverlayOnly]);
-
-  useEffect(() => {
-    return () => {
-      if (laserRafRef.current !== null) {
-        cancelAnimationFrame(laserRafRef.current);
-        laserRafRef.current = null;
-      }
-    };
-  }, []);
+    animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+  }, [renderScene]);
 
   // Redraw when Document or Theme changes
   useEffect(() => {
@@ -1883,7 +1871,6 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         time: performance.now(),
         size: activePen.size * 2,
       });
-      startLaserDecayIfNeeded();
       renderOverlayOnly();
       return;
     }
