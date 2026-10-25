@@ -30,15 +30,6 @@ export interface ViewportRect {
 export class CanvasRenderer {
   private imageCache = new Map<string, HTMLImageElement>();
   private patternCache = new Map<string, CanvasPattern>();
-  private strokePathCache = new Map<string, Path2D>();
-
-  public invalidateStroke(id: string) {
-    this.strokePathCache.delete(id);
-  }
-
-  public clearStrokeCache() {
-    this.strokePathCache.clear();
-  }
 
   /**
    * Helper: Cache and create Excalidraw-style hachure / cross-hatch fill patterns
@@ -722,31 +713,14 @@ export class CanvasRenderer {
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
 
-    // Fast-path: Check GPU Path2D cache for committed strokes (<0.01ms replay)
-    if (isCommitted && stroke.id && penType !== 'calligraphy' && penType !== 'dashed') {
-      const cached = this.strokePathCache.get(stroke.id);
-      if (cached) {
-        ctx.fill(cached);
-        ctx.restore();
-        return;
-      }
-    }
-
     // Single dot or deliberate tap
     if (pts.length === 1) {
       const p = pts[0];
       const calPressure = calibrateHardwarePressure(p.pressure ?? 0.7);
       const dotRadius = Math.max(1, (size * calPressure) / 2);
-      if (isCommitted && stroke.id) {
-        const dotPath = new Path2D();
-        dotPath.arc(p.x, p.y, dotRadius, 0, Math.PI * 2);
-        this.strokePathCache.set(stroke.id, dotPath);
-        ctx.fill(dotPath);
-      } else {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, dotRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, dotRadius, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
       return;
     }
@@ -782,7 +756,7 @@ export class CanvasRenderer {
 
     // Excalidraw-grade freehand ribbon rendering via perfect-freehand (Method A: filled polygon only, 0 chord lines)
     // Used for all standard pens, brush, fountain, marker, and highlighter (ONE filled path, no overlap darkening)
-    this.renderVariableWidthStroke(ctx, pts, size, penType, isCommitted, stroke.id);
+    this.renderVariableWidthStroke(ctx, pts, size, penType, isCommitted);
     ctx.restore();
   }
 
@@ -798,8 +772,7 @@ export class CanvasRenderer {
     points: StrokePoint[],
     baseSize: number,
     penType?: string,
-    isCommitted = true,
-    strokeId?: string
+    isCommitted = true
   ) {
     if (points.length < 2) return;
 
@@ -841,38 +814,31 @@ export class CanvasRenderer {
 
     if (outlinePoints.length < 3) {
       if (outlinePoints.length === 2) {
-        const pPath = new Path2D();
-        pPath.arc(outlinePoints[0][0], outlinePoints[0][1], strokeSize / 4, 0, Math.PI * 2);
-        if (isCommitted && strokeId) {
-          this.strokePathCache.set(strokeId, pPath);
-        }
-        ctx.fill(pPath);
+        ctx.beginPath();
+        ctx.arc(outlinePoints[0][0], outlinePoints[0][1], strokeSize / 4, 0, Math.PI * 2);
+        ctx.fill();
       }
       return;
     }
 
     // Convert outline points to smooth midpoint quadratic curves (Excalidraw standard)
-    const path = new Path2D();
+    ctx.beginPath();
     const len = outlinePoints.length;
     const p0 = outlinePoints[0];
     const p1 = outlinePoints[1];
-    path.moveTo((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+    ctx.moveTo((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
 
     for (let i = 1; i < len; i++) {
       const cur = outlinePoints[i];
       const next = outlinePoints[(i + 1) % len];
-      path.quadraticCurveTo(cur[0], cur[1], (cur[0] + next[0]) / 2, (cur[1] + next[1]) / 2);
+      ctx.quadraticCurveTo(cur[0], cur[1], (cur[0] + next[0]) / 2, (cur[1] + next[1]) / 2);
     }
 
     // Bridge the final segment back to start midpoint smoothly
-    path.quadraticCurveTo(outlinePoints[0][0], outlinePoints[0][1], (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
-    path.closePath();
+    ctx.quadraticCurveTo(outlinePoints[0][0], outlinePoints[0][1], (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
 
-    if (isCommitted && strokeId) {
-      this.strokePathCache.set(strokeId, path);
-    }
-
-    ctx.fill(path); // Never stroke(), only fill
+    ctx.closePath();
+    ctx.fill(); // Never stroke(), only fill
   }
 
   private renderCalligraphyStroke(
