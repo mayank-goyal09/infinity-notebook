@@ -53,6 +53,8 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
   onDeleteRowWithUndo,
   allTables = [],
   initialFocusedCell = null,
+  activeTool = 'select',
+  onSelectTool,
 }) => {
   const [editingCell, setEditingCell] = useState<{ rowId: string; colId: string } | null>(
     initialFocusedCell || null
@@ -500,7 +502,7 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
   const baseHeaderHeight = table.headerHeight || 36;
   const tbScale = Math.max(1, baseFontSize / 12);
   const tbIconSize = Math.max(14, Math.round(14 * tbScale));
-  const isDrawingTool = activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'laser' || activeTool === 'eraser';
+  const isDrawingTool = activeTool === 'pen' || activeTool === 'laser' || activeTool === 'eraser';
 
   return (
     <div
