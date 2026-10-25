@@ -3409,11 +3409,31 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           : 'cursor-default'
       }`}
     >
+      {/* Layer 0: Interactive Accounting Tables */}
+      {allTableObjects.map((tableObj) => (
+        <AccountingTableOverlay
+          key={tableObj.id}
+          table={tableObj}
+          camera={cameraState}
+          activeTool={activeTool}
+          onSelectTool={onSelectTool}
+          isSelected={selectedTableId === tableObj.id}
+          onSelect={() => {
+            onSelectTable?.(tableObj.id);
+          }}
+          onUpdateTable={handleUpdateTable}
+          onDeleteTable={() => handleDeleteTable(tableObj.id)}
+          onDeleteRowWithUndo={onDeleteRowWithUndo}
+          allTables={allTableObjects}
+          initialFocusedCell={selectedTableId === tableObj.id ? initialFocusedCell : null}
+        />
+      ))}
+
       {/* Layer 1: Persistent Document Canvas */}
-      <canvas ref={docCanvasRef} className="absolute inset-0 block pointer-events-none" />
+      <canvas ref={docCanvasRef} className="absolute inset-0 block pointer-events-none z-10" />
 
       {/* Layer 2: Fast Overlay Canvas (<16ms latency) */}
-      <canvas ref={overlayCanvasRef} className="absolute inset-0 block pointer-events-none" />
+      <canvas ref={overlayCanvasRef} className="absolute inset-0 block pointer-events-none z-20" />
 
       {/* Drag-and-drop Ghost Preview */}
       {dragGhost && (
@@ -3432,29 +3452,6 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           <span>Drop to place {dragGhost.title}</span>
         </div>
       )}
-
-      {/* Layer 3: Interactive Accounting Tables */}
-      {allTableObjects.map((tableObj) => (
-        <AccountingTableOverlay
-          key={tableObj.id}
-          table={tableObj}
-          camera={cameraState}
-          activeTool={activeTool}
-          onSelectTool={onSelectTool}
-          isSelected={selectedTableId === tableObj.id}
-          onSelect={() => {
-            if (activeTool === 'pen' || activeTool === 'laser' || activeTool === 'eraser') {
-              onSelectTool?.('select');
-            }
-            onSelectTable?.(tableObj.id);
-          }}
-          onUpdateTable={handleUpdateTable}
-          onDeleteTable={() => handleDeleteTable(tableObj.id)}
-          onDeleteRowWithUndo={onDeleteRowWithUndo}
-          allTables={allTableObjects}
-          initialFocusedCell={selectedTableId === tableObj.id ? initialFocusedCell : null}
-        />
-      ))}
 
       {/* Top Floating Hint Bar: Press Esc or Ctrl+Enter to finish editing */}
       {(editingStickyObj || editingTextObj) && (
