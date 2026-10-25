@@ -629,28 +629,47 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     });
   }, [doc.pages, doc.objects, doc.currentMode, theme, canvasBg, editingTextObj, editingStickyObj]);
 
-  // Window Resize Listener
+  // Window & Container Resize Listener (Live observer updates canvas dimensions simultaneously)
   useEffect(() => {
-    const handleResize = () => {
-      const container = containerRef.current;
-      const docCanvas = docCanvasRef.current;
-      const overlayCanvas = overlayCanvasRef.current;
-      if (!container || !docCanvas || !overlayCanvas) return;
+    const container = containerRef.current;
+    const docCanvas = docCanvasRef.current;
+    const overlayCanvas = overlayCanvasRef.current;
+    if (!container || !docCanvas || !overlayCanvas) return;
 
+    const handleResize = () => {
       const w = container.clientWidth;
       const h = container.clientHeight;
+      if (w === 0 || h === 0) return;
 
-      docCanvas.width = w;
-      docCanvas.height = h;
-      overlayCanvas.width = w;
-      overlayCanvas.height = h;
+      let changed = false;
+      if (docCanvas.width !== w || docCanvas.height !== h) {
+        docCanvas.width = w;
+        docCanvas.height = h;
+        changed = true;
+      }
+      if (overlayCanvas.width !== w || overlayCanvas.height !== h) {
+        overlayCanvas.width = w;
+        overlayCanvas.height = h;
+        changed = true;
+      }
 
-      renderScene();
+      if (changed) {
+        renderScene();
+      }
     };
 
     handleResize();
+
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+    resizeObserver.observe(container);
+
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleResize);
+    };
   }, [renderScene]);
 
   // Continuous Laser Pointer Decay Animation
@@ -3150,16 +3169,13 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       // Zoom shortcuts: Ctrl + / Ctrl - / Ctrl 0
       if (e.ctrlKey && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
-        const rect = containerRef.current?.getBoundingClientRect();
-        cameraEngineRef.current.zoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, 1.25);
+        handleCustomZoomIn();
       } else if (e.ctrlKey && e.key === '-') {
         e.preventDefault();
-        const rect = containerRef.current?.getBoundingClientRect();
-        cameraEngineRef.current.zoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, 0.8);
+        handleCustomZoomOut();
       } else if (e.ctrlKey && (e.key === '0' || e.key === '1')) {
         e.preventDefault();
-        const rect = containerRef.current?.getBoundingClientRect();
-        cameraEngineRef.current.setZoom((rect?.width || 800) / 2, (rect?.height || 600) / 2, 1.0);
+        handleCustomZoomReset();
       }
     };
 
@@ -3170,17 +3186,23 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       clickToInkFSMRef.current?.handleKeyUp(e);
     };
 
+    const ZOOM_LEVELS = [0.10, 0.15, 0.25, 0.33, 0.50, 0.67, 0.75, 0.90, 1.00, 1.25, 1.50, 1.75, 2.00, 2.50, 3.00, 4.00, 5.00];
+
     const handleCustomZoomIn = () => {
       const rect = containerRef.current?.getBoundingClientRect();
-      cameraEngineRef.current.zoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, 1.2);
+      const current = cameraEngineRef.current.getState().zoom;
+      const next = ZOOM_LEVELS.find((lvl) => lvl > current + 0.005) ?? Math.min(5.0, current * 1.25);
+      cameraEngineRef.current.smoothZoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, next, 180);
     };
     const handleCustomZoomOut = () => {
       const rect = containerRef.current?.getBoundingClientRect();
-      cameraEngineRef.current.zoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, 1 / 1.2);
+      const current = cameraEngineRef.current.getState().zoom;
+      const prev = [...ZOOM_LEVELS].reverse().find((lvl) => lvl < current - 0.005) ?? Math.max(0.10, current / 1.25);
+      cameraEngineRef.current.smoothZoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, prev, 180);
     };
     const handleCustomZoomReset = () => {
       const rect = containerRef.current?.getBoundingClientRect();
-      cameraEngineRef.current.setZoom((rect?.width || 800) / 2, (rect?.height || 600) / 2, 1.0);
+      cameraEngineRef.current.smoothZoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, 1.0, 200);
     };
     const handleCustomZoomFit = () => {
       const container = containerRef.current;
@@ -3189,7 +3211,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       const viewportHeight = container.clientHeight;
 
       if (doc.objects.length === 0) {
-        cameraEngineRef.current.setZoom(viewportWidth / 2, viewportHeight / 2, 1.0);
+        cameraEngineRef.current.smoothZoomAt(viewportWidth / 2, viewportHeight / 2, 1.0, 200);
         return;
       }
 
@@ -3201,11 +3223,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         maxY = Math.max(maxY, obj.y + (obj.height || 300));
       });
 
-      cameraEngineRef.current.zoomToFit(
+      cameraEngineRef.current.smoothZoomToFit(
         { x: minX, y: minY, width: Math.max(100, maxX - minX), height: Math.max(100, maxY - minY) },
         viewportWidth,
         viewportHeight,
-        80
+        80,
+        240
       );
     };
 
@@ -3215,7 +3238,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       const container = containerRef.current;
       if (!container || !targetTable) return;
 
-      cameraEngineRef.current.zoomToFit(
+      cameraEngineRef.current.smoothZoomToFit(
         {
           x: targetTable.x,
           y: targetTable.y,
@@ -3224,7 +3247,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         },
         container.clientWidth,
         container.clientHeight,
-        80
+        80,
+        240
       );
     };
 
