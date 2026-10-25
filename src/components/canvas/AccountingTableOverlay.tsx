@@ -528,10 +528,10 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
         transformOrigin: '0 0',
         transform: `scale(${camera.zoom})`,
         width: totalTableWidth + 36, // extra space for per-row action column
-        zIndex: isDrawingTool ? 1 : (isSelected ? 25 : 5),
+        zIndex: 15,
         backgroundColor: tableBgColor,
         color: tableTextColor,
-        pointerEvents: isDrawingTool ? 'none' : 'auto',
+        pointerEvents: 'auto',
       }}
       className={`relative rounded-xl transition-shadow select-none ${
         isTransparent
