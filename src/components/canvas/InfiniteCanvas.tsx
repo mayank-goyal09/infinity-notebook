@@ -215,7 +215,7 @@ interface InfiniteCanvasProps {
   theme: 'light' | 'dark' | 'paper';
   canvasBg?: string;
   onClickToInkStateChange: (state: ClickToInkState) => void;
-  onStatsUpdate: (stats: PerformanceStats) => void;
+  onStatsUpdate: (stats: PerformanceStats | ((prev: PerformanceStats) => PerformanceStats)) => void;
   selectedTableId?: string | null;
   onSelectTable?: (id: string | null) => void;
   onDropFormat?: (formatType: AccountingFormatType, x: number, y: number) => void;
@@ -707,6 +707,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     cameraEngineRef.current.setOnChange(() => {
       const state = cameraEngineRef.current.getState();
       setCameraState({ ...state });
+      onStatsUpdate?.((prev: PerformanceStats) => ({
+        ...prev,
+        zoomPercent: Math.round(state.zoom * 100),
+      }));
       const container = containerRef.current;
       if (container) {
         const cx = Math.round((container.clientWidth / 2 - state.x) / state.zoom);
@@ -724,21 +728,38 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       renderScene();
     });
 
-    const handleBeforeUnload = () => {
+    // Synchronize initial zoom stat with parent on mount immediately
+    const initialCam = cameraEngineRef.current.getState();
+    onStatsUpdate?.((prev: PerformanceStats) => ({
+      ...prev,
+      zoomPercent: Math.round(initialCam.zoom * 100),
+    }));
+
+    const handleSaveCamera = () => {
       try {
         const state = cameraEngineRef.current.getState();
         localStorage.setItem('infinity_last_camera', JSON.stringify(state));
       } catch {}
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('beforeunload', handleSaveCamera);
+    window.addEventListener('pagehide', handleSaveCamera);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        handleSaveCamera();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('beforeunload', handleSaveCamera);
+      window.removeEventListener('pagehide', handleSaveCamera);
+      document.removeEventListener('visibilitychange', handleVisibility);
       if (saveCameraTimerRef.current !== null) {
         window.clearTimeout(saveCameraTimerRef.current);
       }
     };
-  }, [renderScene, onViewportCenterChange]);
+  }, [renderScene, onViewportCenterChange, onStatsUpdate]);
 
   const handleUpdateTable = (updatedTable: AccountingTableObject) => {
     const updatedObjects = doc.objects.map((obj) =>
