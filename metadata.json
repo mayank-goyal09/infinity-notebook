@@ -1,0 +1,6 @@
+{
+  "name": "Infinity Notebook",
+  "description": "Production-quality, local-first note-taking app with endless pages and infinite canvas, high-precision cursor-anchored zoom, and hands-free Click-to-Ink.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
