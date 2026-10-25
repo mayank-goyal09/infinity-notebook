@@ -397,53 +397,34 @@ export default function App() {
     const zoomScale = currentZoom < 0.95 ? Math.min(6.0, 1 / currentZoom) : 1.0;
 
     const meta = ACCOUNTING_FORMAT_CATALOG.find((m) => m.type === formatType);
-    const approxW = Math.round((meta?.recommendedWidth || 680) * zoomScale);
-    const approxH = Math.round(260 * zoomScale);
+    const approxW = meta?.recommendedWidth || 680;
+    const approxH = 260;
 
     let placeX = targetDocX;
     let placeY = targetDocY;
 
     if (placeX === undefined || placeY === undefined) {
-      // Place right in the center of the user's current open canvas space!
-      const center = viewportCenterRef.current;
-      placeX = Math.round(center.x - approxW / 2);
-      placeY = Math.round(center.y - approxH / 2);
+      const existingTables = doc.objects.filter((o): o is AccountingTableObject => o.type === 'table');
+      if (lastDocCursorPosRef.current) {
+        placeX = Math.round(lastDocCursorPosRef.current.x - approxW / 2);
+        placeY = Math.round(lastDocCursorPosRef.current.y - approxH / 2);
+      } else if (existingTables.length > 0) {
+        // Automatically stack cleanly below existing formats to prevent overlapping!
+        const lowestTable = existingTables.reduce((prev, curr) => {
+          const prevBottom = prev.y + (prev.height || 260);
+          const currBottom = curr.y + (curr.height || 260);
+          return currBottom > prevBottom ? curr : prev;
+        });
+        placeX = lowestTable.x;
+        placeY = lowestTable.y + (lowestTable.height || 260) + 40;
+      } else {
+        const center = viewportCenterRef.current;
+        placeX = Math.round(center.x - approxW / 2);
+        placeY = Math.round(center.y - approxH / 2);
+      }
     }
 
-    let newTable = createAccountingTable(formatType, placeX, placeY, currencySymbol);
-
-    if (zoomScale > 1.01) {
-      const updatedCols = newTable.columns.map((c) => ({
-        ...c,
-        width: Math.round(c.width * zoomScale),
-      }));
-      const baseRowH = newTable.rowHeight || 32;
-      const baseHdrH = newTable.headerHeight || 36;
-      const baseFont = newTable.fontSize || 12;
-
-      const nextRowH = Math.max(20, Math.round(baseRowH * zoomScale));
-      const nextHdrH = Math.max(22, Math.round(baseHdrH * zoomScale));
-      const nextFont = Math.max(10, Math.round(baseFont * zoomScale));
-
-      const updatedRows = newTable.rows.map((r) => ({
-        ...r,
-        height: Math.max(20, Math.round((r.height || baseRowH) * zoomScale)),
-      }));
-
-      const finalWidth = updatedCols.reduce((s, c) => s + c.width, 0);
-      const finalHeight = nextHdrH + updatedRows.reduce((s, r) => s + (r.height || nextRowH), 0);
-
-      newTable = {
-        ...newTable,
-        columns: updatedCols,
-        rows: updatedRows,
-        width: finalWidth,
-        height: finalHeight,
-        fontSize: nextFont,
-        rowHeight: nextRowH,
-        headerHeight: nextHdrH,
-      };
-    }
+    const newTable = createAccountingTable(formatType, placeX, placeY, currencySymbol);
 
     const updated = {
       ...doc,
