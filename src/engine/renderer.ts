@@ -454,12 +454,14 @@ export class CanvasRenderer {
     const { x, y, columns, rows, title, showBalancedIndicator, currencySymbol = '$' } = table;
     const isDark = theme === 'dark';
 
-    const headerHeight = 32;
-    const rowHeight = 28;
+    const headerHeight = table.headerHeight || 36;
+    const rowHeight = table.rowHeight || 32;
     const titleBarHeight = 32;
+    const baseFontSize = table.fontSize || 12;
 
     const totalWidth = columns.reduce((acc, c) => acc + c.width, 0);
-    const totalHeight = titleBarHeight + headerHeight + rows.length * rowHeight;
+    const rowsHeight = rows.reduce((acc, r) => acc + (r.height || rowHeight), 0);
+    const totalHeight = titleBarHeight + headerHeight + rowsHeight;
 
     // Table container shadow and background card
     ctx.shadowColor = isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(15, 23, 42, 0.08)';
@@ -558,7 +560,7 @@ export class CanvasRenderer {
 
     let curX = x;
     ctx.fillStyle = table.headerTextColor || defaultTextColor;
-    ctx.font = '600 12px Inter, -apple-system, sans-serif';
+    ctx.font = `600 ${Math.max(10, Math.round(baseFontSize * 0.95))}px Inter, -apple-system, sans-serif`;
 
     columns.forEach((col, idx) => {
       let textX = curX + 8;
@@ -593,13 +595,14 @@ export class CanvasRenderer {
     rows.forEach((row) => {
       const isTotal = row.isTotal;
       const isSubtotal = row.isSubtotal;
+      const currentRowHeight = row.height || rowHeight;
 
       if (isTotal) {
         ctx.fillStyle = isDark ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc';
-        ctx.fillRect(x, rowY, totalWidth, rowHeight);
+        ctx.fillRect(x, rowY, totalWidth, currentRowHeight);
       } else if (isSubtotal) {
         ctx.fillStyle = isDark ? 'rgba(255, 255, 255, 0.02)' : '#fdfdfe';
-        ctx.fillRect(x, rowY, totalWidth, rowHeight);
+        ctx.fillRect(x, rowY, totalWidth, currentRowHeight);
       }
 
       if (isTotal) {
@@ -613,17 +616,17 @@ export class CanvasRenderer {
 
         // Double bottom border (Standard Accounting Underline)
         ctx.beginPath();
-        ctx.moveTo(x, rowY + rowHeight - 3);
-        ctx.lineTo(x + totalWidth, rowY + rowHeight - 3);
-        ctx.moveTo(x, rowY + rowHeight - 1);
-        ctx.lineTo(x + totalWidth, rowY + rowHeight - 1);
+        ctx.moveTo(x, rowY + currentRowHeight - 3);
+        ctx.lineTo(x + totalWidth, rowY + currentRowHeight - 3);
+        ctx.moveTo(x, rowY + currentRowHeight - 1);
+        ctx.lineTo(x + totalWidth, rowY + currentRowHeight - 1);
         ctx.stroke();
       } else {
         ctx.strokeStyle = isDark ? '#27272a' : '#f1f5f9';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(x, rowY + rowHeight);
-        ctx.lineTo(x + totalWidth, rowY + rowHeight);
+        ctx.moveTo(x, rowY + currentRowHeight);
+        ctx.lineTo(x + totalWidth, rowY + currentRowHeight);
         ctx.stroke();
       }
 
@@ -643,7 +646,7 @@ export class CanvasRenderer {
               : '#334155');
           const fontStyle = cell.italic ? 'italic ' : '';
           const fontWeight = cell.bold || isTotal ? '600 ' : '400 ';
-          ctx.font = `${fontStyle}${fontWeight}12px Inter, -apple-system, sans-serif`;
+          ctx.font = `${fontStyle}${fontWeight}${baseFontSize}px Inter, -apple-system, sans-serif`;
 
           const align = cell.align || col.align;
           let textX = cellX + 8;
@@ -655,8 +658,7 @@ export class CanvasRenderer {
           let val = cell.value || '';
           if (
             val &&
-            col.format === 'currency' &&
-            !val.includes(currencySymbol) &&
+            (col.format === 'currency' || col.isAutoSum) &&
             !isNaN(Number(val))
           ) {
             val = Number(val).toLocaleString('en-US', {
@@ -664,7 +666,7 @@ export class CanvasRenderer {
               maximumFractionDigits: 2,
             });
           }
-          ctx.fillText(val, textX, rowY + rowHeight / 2);
+          ctx.fillText(val, textX, rowY + currentRowHeight / 2);
         }
 
         cellX += col.width;
@@ -674,12 +676,12 @@ export class CanvasRenderer {
           ctx.lineWidth = 0.5;
           ctx.beginPath();
           ctx.moveTo(cellX, rowY);
-          ctx.lineTo(cellX, rowY + rowHeight);
+          ctx.lineTo(cellX, rowY + currentRowHeight);
           ctx.stroke();
         }
       });
 
-      rowY += rowHeight;
+      rowY += currentRowHeight;
     });
 
     ctx.restore();
