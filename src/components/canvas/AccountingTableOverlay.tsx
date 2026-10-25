@@ -5,12 +5,14 @@ import {
   TableRow,
   TableCell,
   CameraState,
+  ToolType,
 } from '../../types/document';
 import {
   evaluateTableBalance,
   recalculateTableAutoSums,
   applyDrCrMutualExclusivity,
   extractExistingAccountNames,
+  ACCOUNT_CATEGORY_LOOKUP,
 } from '../../engine/accountingFormats';
 import {
   Plus,
@@ -37,6 +39,8 @@ interface AccountingTableOverlayProps {
   onDeleteRowWithUndo?: (deletedRow: TableRow, rowIndex: number) => void;
   allTables?: AccountingTableObject[];
   initialFocusedCell?: { rowId: string; colId: string } | null;
+  activeTool?: ToolType;
+  onSelectTool?: (tool: ToolType) => void;
 }
 
 export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
@@ -478,14 +482,15 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
     setShowExportMenu(false);
   };
 
-  // Filter autocomplete suggestions
-  const filteredSuggestions = availableAccounts
-    .filter(
-      (name) =>
-        name.toLowerCase().includes(autocompleteQuery.toLowerCase()) &&
-        name.toLowerCase() !== autocompleteQuery.toLowerCase()
-    )
-    .slice(0, 5);
+  // Filter autocomplete suggestions with smart ranking (starts-with first)
+  const q = autocompleteQuery.trim().toLowerCase();
+  const startsWithMatches = availableAccounts.filter(
+    (name) => name.toLowerCase().startsWith(q) && name.toLowerCase() !== q
+  );
+  const containsMatches = availableAccounts.filter(
+    (name) => !name.toLowerCase().startsWith(q) && name.toLowerCase().includes(q) && name.toLowerCase() !== q
+  );
+  const filteredSuggestions = [...startsWithMatches, ...containsMatches].slice(0, 10);
 
   const isTransparent = table.bgColor === 'transparent';
   const tableBgColor = isTransparent ? 'transparent' : (table.bgColor || undefined);
@@ -495,6 +500,7 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
   const baseHeaderHeight = table.headerHeight || 36;
   const tbScale = Math.max(1, baseFontSize / 12);
   const tbIconSize = Math.max(14, Math.round(14 * tbScale));
+  const isDrawingTool = activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'laser' || activeTool === 'eraser';
 
   return (
     <div
@@ -544,7 +550,7 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
             marginBottom: `${Math.round(8 * tbScale)}px`,
             paddingBottom: `${Math.round(4 * tbScale)}px`,
           }}
-          className="absolute top-0 left-0 right-0 flex items-center pointer-events-auto z-40"
+          className="absolute top-0 left-0 flex items-center pointer-events-auto z-40 max-w-none"
         >
           <div
             style={{
@@ -553,7 +559,7 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
               borderRadius: `${Math.round(12 * tbScale)}px`,
               gap: `${Math.round(8 * tbScale)}px`,
             }}
-            className="w-full bg-white/95 dark:bg-stone-900/95 backdrop-blur-md border border-stone-200 dark:border-stone-800 shadow-lg flex items-center justify-between"
+            className="w-max min-w-full bg-white/95 dark:bg-stone-900/95 backdrop-blur-md border border-stone-200 dark:border-stone-800 shadow-lg flex items-center justify-between"
           >
             {/* Left Cluster: Move, Title, Live Dr = Cr Balance Badge */}
             <div
@@ -1144,20 +1150,32 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
                               <div
                                 onPointerDown={(e) => e.stopPropagation()}
                                 onMouseDown={(e) => e.stopPropagation()}
-                                className="absolute left-0 top-full mt-1 w-48 bg-white dark:bg-stone-900 rounded-lg shadow-xl border border-stone-200 dark:border-stone-800 py-1 z-50 text-left"
+                                style={{
+                                  fontSize: `${Math.max(12, baseFontSize)}px`,
+                                  minWidth: `${Math.max(260, Math.round(col.width * 1.2))}px`,
+                                }}
+                                className="absolute left-0 top-full mt-1 w-max max-w-md bg-white/95 dark:bg-stone-900/95 backdrop-blur-md rounded-xl shadow-2xl border border-stone-200 dark:border-stone-800 py-1.5 z-50 text-left max-h-60 overflow-y-auto"
                               >
-                                {filteredSuggestions.map((suggestion) => (
-                                  <div
-                                    key={suggestion}
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      handleSelectAutocomplete(row.id, col.id, suggestion);
-                                    }}
-                                    className="px-2.5 py-1 text-xs text-stone-800 dark:text-stone-200 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer truncate font-medium"
-                                  >
-                                    {suggestion}
-                                  </div>
-                                ))}
+                                {filteredSuggestions.map((suggestion) => {
+                                  const category = ACCOUNT_CATEGORY_LOOKUP[suggestion.toLowerCase()];
+                                  return (
+                                    <div
+                                      key={suggestion}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        handleSelectAutocomplete(row.id, col.id, suggestion);
+                                      }}
+                                      className="px-3 py-1.5 text-stone-800 dark:text-stone-200 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer font-medium flex items-center justify-between gap-3 group transition-colors"
+                                    >
+                                      <span className="truncate">{suggestion}</span>
+                                      {category && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold shrink-0 uppercase tracking-wider bg-stone-100 dark:bg-stone-800 text-stone-500 dark:text-stone-400 group-hover:bg-blue-100 dark:group-hover:bg-blue-900 group-hover:text-blue-600 dark:group-hover:text-blue-300">
+                                          {category}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </>
