@@ -227,6 +227,28 @@ interface InfiniteCanvasProps {
   onChangeCanvasBg?: (bg: string) => void;
 }
 
+const getInitialCameraState = (): CameraState => {
+  try {
+    const saved = localStorage.getItem('infinity_last_camera');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (
+        typeof parsed.x === 'number' &&
+        typeof parsed.y === 'number' &&
+        typeof parsed.zoom === 'number' &&
+        !isNaN(parsed.x) &&
+        !isNaN(parsed.y) &&
+        !isNaN(parsed.zoom) &&
+        parsed.zoom > 0.05 &&
+        parsed.zoom < 10
+      ) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return { x: 80, y: 60, zoom: 1.0 };
+};
+
 export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   document: doc,
   onUpdateDocument,
@@ -272,7 +294,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   } | null>(null);
 
   // Engines - start with 100% zoom
-  const cameraEngineRef = useRef<CameraEngine>(new CameraEngine({ x: 80, y: 60, zoom: 1.0 }));
+  const cameraEngineRef = useRef<CameraEngine>(new CameraEngine(getInitialCameraState()));
   const [cameraState, setCameraState] = useState<CameraState>(() => cameraEngineRef.current.getState());
   const rendererRef = useRef<CanvasRenderer>(new CanvasRenderer());
   const clickToInkFSMRef = useRef<ClickToInkFSM | null>(null);
@@ -679,7 +701,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     }
   }, []);
 
-  // Camera change listener
+  // Camera change listener & session persistence
+  const saveCameraTimerRef = useRef<number | null>(null);
   useEffect(() => {
     cameraEngineRef.current.setOnChange(() => {
       const state = cameraEngineRef.current.getState();
@@ -690,8 +713,31 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         const cy = Math.round((container.clientHeight / 2 - state.y) / state.zoom);
         onViewportCenterChange?.({ x: cx, y: cy });
       }
+      if (saveCameraTimerRef.current !== null) {
+        window.clearTimeout(saveCameraTimerRef.current);
+      }
+      saveCameraTimerRef.current = window.setTimeout(() => {
+        try {
+          localStorage.setItem('infinity_last_camera', JSON.stringify(state));
+        } catch {}
+      }, 300);
       renderScene();
     });
+
+    const handleBeforeUnload = () => {
+      try {
+        const state = cameraEngineRef.current.getState();
+        localStorage.setItem('infinity_last_camera', JSON.stringify(state));
+      } catch {}
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (saveCameraTimerRef.current !== null) {
+        window.clearTimeout(saveCameraTimerRef.current);
+      }
+    };
   }, [renderScene, onViewportCenterChange]);
 
   const handleUpdateTable = (updatedTable: AccountingTableObject) => {
