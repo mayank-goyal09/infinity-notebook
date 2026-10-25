@@ -389,22 +389,62 @@ export default function App() {
     }));
   };
 
-  // Accounting Formats & Tables
+  // Accounting Formats & Tables (Proportionally adapted to current zoom viewport)
   const handleInsertFormat = (formatType: AccountingFormatType, targetDocX?: number, targetDocY?: number) => {
+    // Current zoom scale (from stats or last camera)
+    const currentZoom = Math.max(0.1, (stats.zoomPercent || 100) / 100);
+    // If the user is zoomed out (e.g. 15% or 36%), scale the format so it is comfortable and readable at the current zoom
+    const zoomScale = currentZoom < 0.95 ? Math.min(6.0, 1 / currentZoom) : 1.0;
+
+    const meta = ACCOUNTING_FORMAT_CATALOG.find((m) => m.type === formatType);
+    const approxW = Math.round((meta?.recommendedWidth || 680) * zoomScale);
+    const approxH = Math.round(260 * zoomScale);
+
     let placeX = targetDocX;
     let placeY = targetDocY;
 
     if (placeX === undefined || placeY === undefined) {
       // Place right in the center of the user's current open canvas space!
       const center = viewportCenterRef.current;
-      const meta = ACCOUNTING_FORMAT_CATALOG.find((m) => m.type === formatType);
-      const approxW = meta?.recommendedWidth || 680;
-      const approxH = 260;
       placeX = Math.round(center.x - approxW / 2);
       placeY = Math.round(center.y - approxH / 2);
     }
 
-    const newTable = createAccountingTable(formatType, placeX, placeY, currencySymbol);
+    let newTable = createAccountingTable(formatType, placeX, placeY, currencySymbol);
+
+    if (zoomScale > 1.01) {
+      const updatedCols = newTable.columns.map((c) => ({
+        ...c,
+        width: Math.round(c.width * zoomScale),
+      }));
+      const baseRowH = newTable.rowHeight || 32;
+      const baseHdrH = newTable.headerHeight || 36;
+      const baseFont = newTable.fontSize || 12;
+
+      const nextRowH = Math.max(20, Math.round(baseRowH * zoomScale));
+      const nextHdrH = Math.max(22, Math.round(baseHdrH * zoomScale));
+      const nextFont = Math.max(10, Math.round(baseFont * zoomScale));
+
+      const updatedRows = newTable.rows.map((r) => ({
+        ...r,
+        height: Math.max(20, Math.round((r.height || baseRowH) * zoomScale)),
+      }));
+
+      const finalWidth = updatedCols.reduce((s, c) => s + c.width, 0);
+      const finalHeight = nextHdrH + updatedRows.reduce((s, r) => s + (r.height || nextRowH), 0);
+
+      newTable = {
+        ...newTable,
+        columns: updatedCols,
+        rows: updatedRows,
+        width: finalWidth,
+        height: finalHeight,
+        fontSize: nextFont,
+        rowHeight: nextRowH,
+        headerHeight: nextHdrH,
+      };
+    }
+
     const updated = {
       ...doc,
       objects: [...doc.objects, newTable],
