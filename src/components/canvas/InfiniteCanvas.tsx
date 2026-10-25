@@ -3443,7 +3443,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           onSelectTool={onSelectTool}
           isSelected={selectedTableId === tableObj.id}
           onSelect={() => {
-            if (activeTool === 'pen' || activeTool === 'laser' || activeTool === 'highlighter' || activeTool === 'eraser') {
+            if (activeTool === 'pen' || activeTool === 'laser' || activeTool === 'eraser') {
               onSelectTool?.('select');
             }
             onSelectTable?.(tableObj.id);
