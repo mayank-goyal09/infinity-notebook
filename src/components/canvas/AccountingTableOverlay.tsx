@@ -502,19 +502,22 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
   const baseHeaderHeight = table.headerHeight || 36;
   const tbScale = Math.max(1, baseFontSize / 12);
   const tbIconSize = Math.max(14, Math.round(14 * tbScale));
-  const isDrawingTool = activeTool === 'pen' || activeTool === 'laser' || activeTool === 'eraser';
+  const isDrawingTool = activeTool === 'pen' || activeTool === 'laser' || activeTool === 'eraser' || activeTool === 'shape' || activeTool === 'bucket' || activeTool === 'lasso';
 
   return (
     <div
       onPointerDown={(e) => {
+        if (isDrawingTool) return;
         e.stopPropagation();
         onSelect();
       }}
       onMouseDown={(e) => {
+        if (isDrawingTool) return;
         e.stopPropagation();
         onSelect();
       }}
       onClick={(e) => {
+        if (isDrawingTool) return;
         e.stopPropagation();
         onSelect();
       }}
@@ -525,9 +528,10 @@ export const AccountingTableOverlay: React.FC<AccountingTableOverlayProps> = ({
         transformOrigin: '0 0',
         transform: `scale(${camera.zoom})`,
         width: totalTableWidth + 36, // extra space for per-row action column
-        zIndex: isSelected ? 30 : 10,
+        zIndex: isDrawingTool ? 1 : (isSelected ? 25 : 5),
         backgroundColor: tableBgColor,
         color: tableTextColor,
+        pointerEvents: isDrawingTool ? 'none' : 'auto',
       }}
       className={`relative rounded-xl transition-shadow select-none ${
         isTransparent
