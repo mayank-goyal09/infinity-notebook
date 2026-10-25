@@ -175,8 +175,12 @@ function getEnclosingBounds(objs: CanvasObject[]): { x: number; y: number; width
     let h = obj.height || 0;
     if (obj.type === 'table') {
       const table = obj as AccountingTableObject;
-      w = (table.columns?.reduce((sum, c) => sum + c.width, 0) || table.width || 600) + 36;
-      h = table.height || ((table.headerHeight || 36) + (table.rows?.length || 3) * (table.rowHeight || 32));
+      const colWidthsTotal = table.columns?.reduce((sum, c) => sum + c.width, 0);
+      w = (colWidthsTotal || table.width || 600) + 36;
+      const hdrH = table.headerHeight || 36;
+      const baseRowH = table.rowHeight || 32;
+      const rowsTotal = table.rows?.reduce((sum, r) => sum + (r.height || baseRowH), 0) || (3 * baseRowH);
+      h = table.height || (hdrH + rowsTotal);
     }
     const objMinX = Math.min(obj.x, obj.x + w);
     const objMaxX = Math.max(obj.x, obj.x + w);
@@ -355,7 +359,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   const resizeInitialBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const resizeInitialObjectsRef = useRef<Map<string, CanvasObject>>(new Map());
 
-  // Sync selectedIds prop from App
+  // Sync selectedIds prop from App & coordinate bounding box with moved/resized objects
   useEffect(() => {
     if (selectedIds !== undefined) {
       setSelection((prev) => {
@@ -363,15 +367,28 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           if (prev.selectedIds.length === 0 && !prev.bounds) return prev;
           return { selectedIds: [], bounds: null, mode: 'idle' };
         }
-        const sameLength = prev.selectedIds.length === selectedIds.length;
-        const sameElements = sameLength && prev.selectedIds.every((id, idx) => id === selectedIds[idx]);
-        if (sameElements && prev.bounds) return prev;
 
         const selected = doc.objects.filter((o) => selectedIds.includes(o.id));
+        const newBounds = getEnclosingBounds(selected);
+
+        // Only keep previous reference if both IDs AND coordinates/dimensions are identical
+        if (
+          prev.bounds &&
+          newBounds &&
+          prev.bounds.x === newBounds.x &&
+          prev.bounds.y === newBounds.y &&
+          prev.bounds.width === newBounds.width &&
+          prev.bounds.height === newBounds.height &&
+          prev.selectedIds.length === selectedIds.length &&
+          prev.selectedIds.every((id, idx) => id === selectedIds[idx])
+        ) {
+          return prev;
+        }
+
         return {
           selectedIds,
-          bounds: getEnclosingBounds(selected),
-          mode: 'idle',
+          bounds: newBounds,
+          mode: prev.mode || 'idle',
         };
       });
     }
@@ -784,7 +801,17 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     const updatedObjects = doc.objects.map((obj) =>
       obj.id === updatedTable.id ? updatedTable : obj
     );
-    onUpdateDocument({ ...doc, objects: updatedObjects }, true);
+    setSelection((prev) => {
+      if (prev.selectedIds.includes(updatedTable.id)) {
+        const selected = updatedObjects.filter((o) => prev.selectedIds.includes(o.id));
+        return {
+          ...prev,
+          bounds: getEnclosingBounds(selected),
+        };
+      }
+      return prev;
+    });
+    onUpdateDocument({ ...doc, objects: updatedObjects }, false);
   };
 
   const handleDeleteTable = (tableId: string) => {
@@ -3410,24 +3437,29 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       }`}
     >
       {/* Layer 0: Interactive Accounting Tables */}
-      {allTableObjects.map((tableObj) => (
-        <AccountingTableOverlay
-          key={tableObj.id}
-          table={tableObj}
-          camera={cameraState}
-          activeTool={activeTool}
-          onSelectTool={onSelectTool}
-          isSelected={selectedTableId === tableObj.id}
-          onSelect={() => {
-            onSelectTable?.(tableObj.id);
-          }}
-          onUpdateTable={handleUpdateTable}
-          onDeleteTable={() => handleDeleteTable(tableObj.id)}
-          onDeleteRowWithUndo={onDeleteRowWithUndo}
-          allTables={allTableObjects}
-          initialFocusedCell={selectedTableId === tableObj.id ? initialFocusedCell : null}
-        />
-      ))}
+      {allTableObjects.map((tableObj) => {
+        const liveTable =
+          (activeDragObjectsRef.current?.find((o) => o.id === tableObj.id) as AccountingTableObject) ||
+          tableObj;
+        return (
+          <AccountingTableOverlay
+            key={tableObj.id}
+            table={liveTable}
+            camera={cameraState}
+            activeTool={activeTool}
+            onSelectTool={onSelectTool}
+            isSelected={selectedTableId === tableObj.id}
+            onSelect={() => {
+              onSelectTable?.(tableObj.id);
+            }}
+            onUpdateTable={handleUpdateTable}
+            onDeleteTable={() => handleDeleteTable(tableObj.id)}
+            onDeleteRowWithUndo={onDeleteRowWithUndo}
+            allTables={allTableObjects}
+            initialFocusedCell={selectedTableId === tableObj.id ? initialFocusedCell : null}
+          />
+        );
+      })}
 
       {/* Layer 1: Persistent Document Canvas */}
       <canvas ref={docCanvasRef} className="absolute inset-0 block pointer-events-none z-10" />
