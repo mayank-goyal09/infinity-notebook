@@ -53,11 +53,81 @@ export default function App() {
   const [history, setHistory] = useState<NotebookDocument[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
-  // Tools & Pens
-  const [activeTool, setActiveTool] = useState<ToolType>('pen');
-  const [activePen, setActivePen] = useState<PenConfig>(DEFAULT_PENS[0]); // Ballpoint
-  const [eraserMode, setEraserMode] = useState<'stroke' | 'partial' | 'highlighter_only'>('stroke');
-  const [eraserSize, setEraserSize] = useState<number>(24);
+  // Tools & Pens (with persistent session memory)
+  const [activeTool, setActiveTool] = useState<ToolType>(() => {
+    try {
+      const saved = localStorage.getItem('inf_active_tool');
+      if (saved) return saved as ToolType;
+    } catch {}
+    return 'pen';
+  });
+
+  const [activePen, setActivePen] = useState<PenConfig>(() => {
+    try {
+      const saved = localStorage.getItem('inf_active_pen');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          typeof parsed.type === 'string' &&
+          typeof parsed.color === 'string' &&
+          typeof parsed.size === 'number' &&
+          !isNaN(parsed.size)
+        ) {
+          return parsed as PenConfig;
+        }
+      }
+    } catch {}
+    return DEFAULT_PENS[0];
+  });
+
+  const [eraserMode, setEraserMode] = useState<'stroke' | 'partial' | 'highlighter_only'>(() => {
+    try {
+      const saved = localStorage.getItem('inf_eraser_mode');
+      if (saved === 'stroke' || saved === 'partial' || saved === 'highlighter_only') {
+        return saved;
+      }
+    } catch {}
+    return 'stroke';
+  });
+
+  const [eraserSize, setEraserSize] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('inf_eraser_size');
+      if (saved) {
+        const parsed = Number(saved);
+        if (!isNaN(parsed) && parsed > 0 && parsed <= 200) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return 24;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inf_active_tool', activeTool);
+    } catch {}
+  }, [activeTool]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inf_active_pen', JSON.stringify(activePen));
+    } catch {}
+  }, [activePen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inf_eraser_mode', eraserMode);
+    } catch {}
+  }, [eraserMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inf_eraser_size', String(eraserSize));
+    } catch {}
+  }, [eraserSize]);
   const [activeShape, setActiveShape] = useState<ShapeType>('rectangle');
   const [isToolLocked, setIsToolLocked] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
@@ -186,14 +256,31 @@ export default function App() {
   const [isBenchmarkOpen, setIsBenchmarkOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 
-  // Diagnostics and Storage
-  const [stats, setStats] = useState<PerformanceStats>({
-    fps: 60,
-    frameTimeMs: 16.6,
-    renderedObjects: 0,
-    totalObjects: 0,
-    zoomPercent: 100,
-    mode: 'notebook',
+  // Diagnostics and Storage (initialized from persisted camera zoom)
+  const [stats, setStats] = useState<PerformanceStats>(() => {
+    let initialZoom = 100;
+    try {
+      const saved = localStorage.getItem('infinity_last_camera');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          typeof parsed.zoom === 'number' &&
+          !isNaN(parsed.zoom) &&
+          parsed.zoom > 0.05 &&
+          parsed.zoom < 10
+        ) {
+          initialZoom = Math.round(parsed.zoom * 100);
+        }
+      }
+    } catch {}
+    return {
+      fps: 60,
+      frameTimeMs: 16.6,
+      renderedObjects: 0,
+      totalObjects: 0,
+      zoomPercent: initialZoom,
+      mode: 'notebook',
+    };
   });
   const [storageEstimate, setStorageEstimate] = useState({ usedMb: 1.2, quotaMb: 500, percent: 0.2 });
 
