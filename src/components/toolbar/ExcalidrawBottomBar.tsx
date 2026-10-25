@@ -24,14 +24,45 @@ export const ExcalidrawBottomBar: React.FC<ExcalidrawBottomBarProps> = ({
   onUndo,
   onRedo,
 }) => {
+  const repeatTimerRef = React.useRef<number | null>(null);
+  const repeatIntervalRef = React.useRef<number | null>(null);
+
+  const startRepeating = (action: () => void) => {
+    action();
+    stopRepeating();
+    repeatTimerRef.current = window.setTimeout(() => {
+      repeatIntervalRef.current = window.setInterval(() => {
+        action();
+      }, 70);
+    }, 280);
+  };
+
+  const stopRepeating = () => {
+    if (repeatTimerRef.current !== null) {
+      window.clearTimeout(repeatTimerRef.current);
+      repeatTimerRef.current = null;
+    }
+    if (repeatIntervalRef.current !== null) {
+      window.clearInterval(repeatIntervalRef.current);
+      repeatIntervalRef.current = null;
+    }
+  };
+
+  React.useEffect(() => {
+    return () => stopRepeating();
+  }, []);
+
   return (
     <div className="fixed bottom-3 left-3 z-50 flex items-center gap-2 select-none pointer-events-auto">
       {/* Pill 1: Zoom Controls */}
       <div className="bg-white/95 dark:bg-stone-900/95 backdrop-blur-md border border-stone-200/80 dark:border-stone-800 rounded-xl shadow-lg p-1 flex items-center gap-0.5 text-xs">
         {/* Zoom Out */}
         <button
-          onClick={onZoomOut}
-          className="p-1.5 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+          onPointerDown={() => startRepeating(onZoomOut)}
+          onPointerUp={stopRepeating}
+          onPointerLeave={stopRepeating}
+          onPointerCancel={stopRepeating}
+          className="p-1.5 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer active:scale-95"
           title="Zoom out (Ctrl + -)"
           aria-label="Zoom out"
         >
@@ -50,8 +81,11 @@ export const ExcalidrawBottomBar: React.FC<ExcalidrawBottomBarProps> = ({
 
         {/* Zoom In */}
         <button
-          onClick={onZoomIn}
-          className="p-1.5 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+          onPointerDown={() => startRepeating(onZoomIn)}
+          onPointerUp={stopRepeating}
+          onPointerLeave={stopRepeating}
+          onPointerCancel={stopRepeating}
+          className="p-1.5 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer active:scale-95"
           title="Zoom in (Ctrl + +)"
           aria-label="Zoom in"
         >
