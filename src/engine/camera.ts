@@ -9,6 +9,7 @@ export class CameraEngine {
   private velocityX = 0;
   private velocityY = 0;
   private animationFrameId: number | null = null;
+  private zoomAnimFrameId: number | null = null;
 
   constructor(initialState?: Partial<CameraState>, onChange?: (state: CameraState) => void) {
     this.state = {
@@ -50,6 +51,7 @@ export class CameraEngine {
 
   public panBy(screenDx: number, screenDy: number) {
     this.stopInertia();
+    this.stopZoomAnimation();
     this.state.x += screenDx;
     this.state.y += screenDy;
     this.emitChange();
@@ -57,6 +59,7 @@ export class CameraEngine {
 
   public setPan(x: number, y: number) {
     this.stopInertia();
+    this.stopZoomAnimation();
     this.state.x = x;
     this.state.y = y;
     this.emitChange();
@@ -70,6 +73,7 @@ export class CameraEngine {
    */
   public zoomAt(screenX: number, screenY: number, zoomFactor: number) {
     this.stopInertia();
+    this.stopZoomAnimation();
     const oldZoom = this.state.zoom;
     const targetZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, oldZoom * zoomFactor));
 
@@ -87,6 +91,7 @@ export class CameraEngine {
 
   public setZoom(screenX: number, screenY: number, targetZoom: number) {
     this.stopInertia();
+    this.stopZoomAnimation();
     const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, targetZoom));
     const ratio = clampedZoom / this.state.zoom;
     this.state.x = screenX - (screenX - this.state.x) * ratio;
@@ -97,6 +102,7 @@ export class CameraEngine {
 
   public zoomToFit(bounds: { x: number; y: number; width: number; height: number }, viewportWidth: number, viewportHeight: number, padding = 60) {
     this.stopInertia();
+    this.stopZoomAnimation();
     if (bounds.width <= 0 || bounds.height <= 0) return;
 
     const availableWidth = Math.max(100, viewportWidth - padding * 2);
@@ -149,6 +155,101 @@ export class CameraEngine {
     }
     this.velocityX = 0;
     this.velocityY = 0;
+  }
+
+  public stopZoomAnimation() {
+    if (this.zoomAnimFrameId !== null) {
+      cancelAnimationFrame(this.zoomAnimFrameId);
+      this.zoomAnimFrameId = null;
+    }
+  }
+
+  /**
+   * Smoothly animates zoom level anchored at specific screen coordinate with live 60-120 FPS updates.
+   */
+  public smoothZoomAt(screenX: number, screenY: number, targetZoom: number, durationMs = 200) {
+    this.stopInertia();
+    this.stopZoomAnimation();
+
+    const startZoom = this.state.zoom;
+    const clampedTarget = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, targetZoom));
+    if (Math.abs(clampedTarget - startZoom) < 0.0001) return;
+
+    const startTime = performance.now();
+
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      // Cubic ease-out
+      const ease = 1 - Math.pow(1 - progress, 3);
+      const currentZoom = startZoom + (clampedTarget - startZoom) * ease;
+
+      const ratio = currentZoom / this.state.zoom;
+      this.state.x = screenX - (screenX - this.state.x) * ratio;
+      this.state.y = screenY - (screenY - this.state.y) * ratio;
+      this.state.zoom = currentZoom;
+      this.emitChange();
+
+      if (progress < 1) {
+        this.zoomAnimFrameId = requestAnimationFrame(step);
+      } else {
+        this.zoomAnimFrameId = null;
+      }
+    };
+
+    this.zoomAnimFrameId = requestAnimationFrame(step);
+  }
+
+  /**
+   * Smoothly animates zoom and recenters bounding box with live 60-120 FPS updates.
+   */
+  public smoothZoomToFit(
+    bounds: { x: number; y: number; width: number; height: number },
+    viewportWidth: number,
+    viewportHeight: number,
+    padding = 60,
+    durationMs = 240
+  ) {
+    this.stopInertia();
+    this.stopZoomAnimation();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+
+    const availableWidth = Math.max(100, viewportWidth - padding * 2);
+    const availableHeight = Math.max(100, viewportHeight - padding * 2);
+    const fitZoom = Math.min(
+      availableWidth / bounds.width,
+      availableHeight / bounds.height,
+      3.0
+    );
+    const targetZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, fitZoom));
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    const targetX = viewportWidth / 2 - centerX * targetZoom;
+    const targetY = viewportHeight / 2 - centerY * targetZoom;
+
+    const startZoom = this.state.zoom;
+    const startX = this.state.x;
+    const startY = this.state.y;
+    const startTime = performance.now();
+
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      const ease = 1 - Math.pow(1 - progress, 3);
+
+      this.state.zoom = startZoom + (targetZoom - startZoom) * ease;
+      this.state.x = startX + (targetX - startX) * ease;
+      this.state.y = startY + (targetY - startY) * ease;
+      this.emitChange();
+
+      if (progress < 1) {
+        this.zoomAnimFrameId = requestAnimationFrame(step);
+      } else {
+        this.zoomAnimFrameId = null;
+      }
+    };
+
+    this.zoomAnimFrameId = requestAnimationFrame(step);
   }
 
   private emitChange() {
