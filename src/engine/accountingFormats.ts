@@ -150,34 +150,72 @@ function makeCell(value: string, opts?: Partial<TableCell>): TableCell {
   };
 }
 
-export const STANDARD_ACCOUNT_NAMES = [
-  'Cash',
-  'Bank Account',
-  'Accounts Receivable',
-  'Allowance for Doubtful Accounts',
-  'Inventory / Merchandise',
-  'Prepaid Insurance',
-  'Prepaid Rent',
-  'Office Supplies',
-  'Office Equipment',
-  'Accumulated Depreciation',
-  'Accounts Payable',
-  'Notes Payable',
-  'Salaries Payable',
-  'Interest Payable',
-  'Capital Account',
-  'Owner Drawings',
-  'Sales Revenue',
-  'Service Revenue',
-  'Cost of Goods Sold',
-  'Rent Expense',
-  'Salaries & Wages Expense',
-  'Utilities Expense',
-  'Advertising Expense',
-  'Insurance Expense',
-  'Depreciation Expense',
-  'Interest Expense',
+export interface AccountDefinition {
+  name: string;
+  category: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+}
+
+export const STANDARD_ACCOUNT_DEFINITIONS: AccountDefinition[] = [
+  // Assets
+  { name: 'Machinery', category: 'Asset' },
+  { name: 'Plant & Machinery', category: 'Asset' },
+  { name: 'Machinery & Equipment', category: 'Asset' },
+  { name: 'Office Equipment', category: 'Asset' },
+  { name: 'Furniture & Fixtures', category: 'Asset' },
+  { name: 'Motor Vehicles', category: 'Asset' },
+  { name: 'Land & Buildings', category: 'Asset' },
+  { name: 'Cash', category: 'Asset' },
+  { name: 'Bank Account', category: 'Asset' },
+  { name: 'Accounts Receivable', category: 'Asset' },
+  { name: 'Allowance for Doubtful Accounts', category: 'Asset' },
+  { name: 'Inventory / Merchandise', category: 'Asset' },
+  { name: 'Prepaid Insurance', category: 'Asset' },
+  { name: 'Prepaid Rent', category: 'Asset' },
+  { name: 'Office Supplies', category: 'Asset' },
+  { name: 'Accumulated Depreciation - Machinery', category: 'Asset' },
+  { name: 'Accumulated Depreciation - Equipment', category: 'Asset' },
+  { name: 'Accumulated Depreciation', category: 'Asset' },
+
+  // Liabilities
+  { name: 'Accounts Payable', category: 'Liability' },
+  { name: 'Notes Payable', category: 'Liability' },
+  { name: 'Salaries Payable', category: 'Liability' },
+  { name: 'Interest Payable', category: 'Liability' },
+  { name: 'Loans Payable', category: 'Liability' },
+  { name: 'Bank Overdraft', category: 'Liability' },
+
+  // Equity
+  { name: 'Capital Account', category: 'Equity' },
+  { name: "Owner's Capital", category: 'Equity' },
+  { name: 'Owner Drawings', category: 'Equity' },
+  { name: 'Retained Earnings', category: 'Equity' },
+
+  // Revenue
+  { name: 'Sales Revenue', category: 'Revenue' },
+  { name: 'Service Revenue', category: 'Revenue' },
+  { name: 'Interest Income', category: 'Revenue' },
+  { name: 'Commission Income', category: 'Revenue' },
+
+  // Expenses
+  { name: 'Cost of Goods Sold', category: 'Expense' },
+  { name: 'Purchases Account', category: 'Expense' },
+  { name: 'Rent Expense', category: 'Expense' },
+  { name: 'Salaries & Wages Expense', category: 'Expense' },
+  { name: 'Utilities Expense', category: 'Expense' },
+  { name: 'Depreciation Expense - Machinery', category: 'Expense' },
+  { name: 'Depreciation Expense', category: 'Expense' },
+  { name: 'Repairs & Maintenance - Machinery', category: 'Expense' },
+  { name: 'Advertising Expense', category: 'Expense' },
+  { name: 'Insurance Expense', category: 'Expense' },
+  { name: 'Interest Expense', category: 'Expense' },
 ];
+
+export const STANDARD_ACCOUNT_NAMES = STANDARD_ACCOUNT_DEFINITIONS.map((a) => a.name);
+
+export const ACCOUNT_CATEGORY_LOOKUP: Record<string, 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense'> = {};
+for (const acc of STANDARD_ACCOUNT_DEFINITIONS) {
+  ACCOUNT_CATEGORY_LOOKUP[acc.name.toLowerCase()] = acc.category;
+}
 
 export function extractExistingAccountNames(tables: AccountingTableObject[]): string[] {
   const list = [...STANDARD_ACCOUNT_NAMES];
