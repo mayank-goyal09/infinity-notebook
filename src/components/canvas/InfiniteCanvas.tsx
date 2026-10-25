@@ -3394,8 +3394,15 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           key={tableObj.id}
           table={tableObj}
           camera={cameraState}
+          activeTool={activeTool}
+          onSelectTool={onSelectTool}
           isSelected={selectedTableId === tableObj.id}
-          onSelect={() => onSelectTable?.(tableObj.id)}
+          onSelect={() => {
+            if (activeTool === 'pen' || activeTool === 'laser' || activeTool === 'highlighter' || activeTool === 'eraser') {
+              onSelectTool?.('select');
+            }
+            onSelectTable?.(tableObj.id);
+          }}
           onUpdateTable={handleUpdateTable}
           onDeleteTable={() => handleDeleteTable(tableObj.id)}
           onDeleteRowWithUndo={onDeleteRowWithUndo}
