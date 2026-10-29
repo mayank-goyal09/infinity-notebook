@@ -35,6 +35,7 @@ import { ACCOUNTING_FORMAT_CATALOG } from '../../engine/accountingFormats';
 import { AccountingTableOverlay } from './AccountingTableOverlay';
 import { TextConfig, StickyConfig } from '../toolbar/ExcalidrawPropertiesPanel';
 import { measureTextBounds, wrapTextLines } from '../../engine/textMeasurement';
+import { getCanvasCursor } from '../../engine/canvasCursors';
 
 // Distance from point p to line segment (v -> w)
 function distToSegment(
@@ -394,6 +395,17 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       });
     }
   }, [selectedIds, doc.objects]);
+
+  // Synchronize canvas container cursor whenever active tool changes
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.style.cursor = getCanvasCursor({
+        activeTool,
+        isSpacePressed: isSpacePressedRef.current,
+        isPanning: isPanningRef.current,
+      });
+    }
+  }, [activeTool]);
 
   // Active Screen Cursor (Stored in ref to eliminate React re-renders on mouse move!)
   const cursorPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -1613,6 +1625,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     if (e.button === 1 || isSpacePressedRef.current || activeTool === 'hand') {
       isPanningRef.current = true;
       panStartRef.current = { x: screenX, y: screenY };
+      if (containerRef.current) {
+        containerRef.current.style.cursor = getCanvasCursor({
+          activeTool,
+          isPanning: true,
+        });
+      }
       return;
     }
 
@@ -2481,22 +2499,29 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         return;
       }
 
-      // 3. Update cursor style when hovering over selection handles or objects
+      // 3. Update cursor style when hovering over selection handles or objects (strictly during select tool)
       if (containerRef.current && selection.bounds && selection.selectedIds.length > 0) {
         const zoom = cameraEngineRef.current.getState().zoom;
         const hoverHandle = getTransformHandleAtPoint(selection.bounds, docPt, zoom);
         if (hoverHandle) {
-          if (hoverHandle === 'nw' || hoverHandle === 'se') containerRef.current.style.cursor = 'nwse-resize';
-          else if (hoverHandle === 'ne' || hoverHandle === 'sw') containerRef.current.style.cursor = 'nesw-resize';
-          else if (hoverHandle === 'n' || hoverHandle === 's') containerRef.current.style.cursor = 'ns-resize';
-          else if (hoverHandle === 'e' || hoverHandle === 'w') containerRef.current.style.cursor = 'ew-resize';
+          containerRef.current.style.cursor = getCanvasCursor({
+            activeTool: 'select',
+            hoverHandle,
+          });
         } else if (isPointInBounds(selection.bounds, docPt)) {
-          containerRef.current.style.cursor = 'move';
+          containerRef.current.style.cursor = getCanvasCursor({
+            activeTool: 'select',
+            isOverSelectedBounds: true,
+          });
         } else {
-          containerRef.current.style.cursor = 'default';
+          containerRef.current.style.cursor = getCanvasCursor({
+            activeTool: 'select',
+          });
         }
       } else if (containerRef.current) {
-        containerRef.current.style.cursor = 'default';
+        containerRef.current.style.cursor = getCanvasCursor({
+          activeTool: 'select',
+        });
       }
     }
   };
@@ -2509,6 +2534,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
     } catch {}
     isPanningRef.current = false;
+    if (containerRef.current) {
+      containerRef.current.style.cursor = getCanvasCursor({
+        activeTool,
+        isSpacePressed: isSpacePressedRef.current,
+      });
+    }
     const rect = containerRef.current?.getBoundingClientRect();
     const docPt = rect
       ? cameraEngineRef.current.screenToDoc(e.clientX - rect.left, e.clientY - rect.top)
@@ -3228,6 +3259,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         isSpacePressedRef.current = true;
+        if (containerRef.current) {
+          containerRef.current.style.cursor = getCanvasCursor({
+            activeTool,
+            isSpacePressed: true,
+          });
+        }
       }
 
       // Click-to-Ink hotkey: Ctrl+Shift+L
@@ -3257,6 +3294,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         isSpacePressedRef.current = false;
+        if (containerRef.current) {
+          containerRef.current.style.cursor = getCanvasCursor({
+            activeTool,
+            isSpacePressed: false,
+          });
+        }
       }
       clickToInkFSMRef.current?.handleKeyUp(e);
     };
@@ -3472,17 +3515,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           renderOverlayOnly();
         }
       }}
-      className={`relative w-full h-screen overflow-hidden touch-none select-none ${
-        activeTool === 'hand'
-          ? 'cursor-grab active:cursor-grabbing'
-          : activeTool === 'laser' || activeTool === 'eraser' || activeTool === 'frame' || activeTool === 'lasso' || activeTool === 'shape'
-          ? 'cursor-crosshair'
-          : activeTool === 'bucket'
-          ? 'cursor-cell'
-          : clickToInkSettings.enabled
-          ? 'cursor-crosshair'
-          : 'cursor-default'
-      }`}
+      style={{
+        cursor: getCanvasCursor({ activeTool }),
+      }}
+      className="relative w-full h-screen overflow-hidden touch-none select-none"
     >
       {/* Layer 0: Background Canvas (z-0: Theme canvas color, infinite grid, page frames) */}
       <canvas ref={bgCanvasRef} className="absolute inset-0 block pointer-events-none z-0" />
