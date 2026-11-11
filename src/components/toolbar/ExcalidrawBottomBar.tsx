@@ -1,5 +1,5 @@
 import React from 'react';
-import { Minus, Plus, Undo2, Redo2, Maximize2 } from 'lucide-react';
+import { Minus, Plus, Undo2, Redo2, Maximize2, Crosshair } from 'lucide-react';
 
 interface ExcalidrawBottomBarProps {
   zoomPercent: number;
@@ -7,6 +7,7 @@ interface ExcalidrawBottomBarProps {
   onZoomOut: () => void;
   onResetZoom: () => void;
   onZoomFit?: () => void;
+  onNavigateToCenter?: () => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -19,6 +20,7 @@ export const ExcalidrawBottomBar: React.FC<ExcalidrawBottomBarProps> = ({
   onZoomOut,
   onResetZoom,
   onZoomFit,
+  onNavigateToCenter,
   canUndo,
   canRedo,
   onUndo,
@@ -104,7 +106,22 @@ export const ExcalidrawBottomBar: React.FC<ExcalidrawBottomBarProps> = ({
         )}
       </div>
 
-      {/* Pill 2: Undo / Redo */}
+      {/* Pill 2: Navigate to Center / Spreadsheets */}
+      {onNavigateToCenter && (
+        <div className="bg-white/95 dark:bg-stone-900/95 backdrop-blur-md border border-stone-200/80 dark:border-stone-800 rounded-xl shadow-lg p-1 flex items-center text-xs">
+          <button
+            onClick={onNavigateToCenter}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-stone-700 dark:text-stone-200 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-600 dark:hover:text-blue-400 font-medium transition-all active:scale-95 cursor-pointer group"
+            title="Navigate to Center / Spreadsheets (Home key)"
+            aria-label="Navigate to Center"
+          >
+            <Crosshair className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 group-hover:rotate-90 transition-transform duration-300" />
+            <span className="text-[11px] font-semibold tracking-tight">Center</span>
+          </button>
+        </div>
+      )}
+
+      {/* Pill 3: Undo / Redo */}
       <div className="bg-white/95 dark:bg-stone-900/95 backdrop-blur-md border border-stone-200/80 dark:border-stone-800 rounded-xl shadow-lg p-1 flex items-center gap-0.5 text-xs">
         {/* Undo */}
         <button

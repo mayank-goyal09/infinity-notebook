@@ -17,13 +17,22 @@ const PEN_SVG = `
 </svg>
 `;
 
-// 2. Razor / Eraser Cursor (Crisp angled eraser block with pink band and scraping edge)
+// 2. Razor / Eraser Cursor (Clean standalone minimalist outline matching the toolbar icon)
 const ERASER_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-  <path d="M4 18L14.5 7.5a2.12 2.12 0 0 1 3 0l2 2a2.12 2.12 0 0 1 0 3L9 23H4v-5z" fill="#ffffff" stroke="#0f172a" stroke-width="1.5" stroke-linejoin="round"/>
-  <path d="M13.5 8.5l3.5 3.5-3 3-3.5-3.5 3-3z" fill="#f43f5e"/>
-  <path d="M4 18l5 5" stroke="#0f172a" stroke-width="1.5"/>
-  <circle cx="4" cy="18" r="1.5" fill="#f43f5e" stroke="#ffffff" stroke-width="0.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none">
+  <!-- High-contrast white backing halo for dark backgrounds -->
+  <rect x="7.5" y="4.5" width="9" height="15" rx="2.5" transform="rotate(45 12 12)" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="7.5" y1="13.5" x2="16.5" y2="13.5" transform="rotate(45 12 12)" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- Subtle translucent fill -->
+  <rect x="7.5" y="4.5" width="9" height="15" rx="2.5" transform="rotate(45 12 12)" fill="#3b82f6" fill-opacity="0.15"/>
+
+  <!-- Crisp dark stroke identical to the toolbar icon -->
+  <rect x="7.5" y="4.5" width="9" height="15" rx="2.5" transform="rotate(45 12 12)" stroke="#0f172a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="7.5" y1="13.5" x2="16.5" y2="13.5" transform="rotate(45 12 12)" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Precision target dot at contact corner (6.5, 17.5) -->
+  <circle cx="6.5" cy="17.5" r="1.5" fill="#3b82f6" stroke="#ffffff" stroke-width="0.75"/>
 </svg>
 `;
 
@@ -66,7 +75,7 @@ const LASER_SVG = `
 // Compiled Data URI strings with calibrated hotspot coordinates
 export const CURSOR_DATA_URIS = {
   pen: `url("${toCursorDataUri(PEN_SVG)}") 2 22, crosshair`,
-  eraser: `url("${toCursorDataUri(ERASER_SVG)}") 4 18, cell`,
+  eraser: `url("${toCursorDataUri(ERASER_SVG)}") 6 18, cell`,
   bucket: `url("${toCursorDataUri(BUCKET_SVG)}") 2 12, cell`,
   lasso: `url("${toCursorDataUri(LASSO_SVG)}") 4 4, crosshair`,
   sticky: `url("${toCursorDataUri(STICKY_SVG)}") 4 4, crosshair`,

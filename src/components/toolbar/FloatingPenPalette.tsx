@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { PenConfig, ToolType, ShapeType } from '../../types/document';
 import { DEFAULT_PENS, COLOR_PALETTE } from '../../engine/penDefaults';
+import { CleanEraserIcon } from '../common/CleanEraserIcon';
 
 interface FloatingPenPaletteProps {
   activeTool: ToolType;
@@ -306,7 +307,7 @@ export const FloatingPenPalette: React.FC<FloatingPenPaletteProps> = ({
             }`}
             title={`Eraser (${eraserMode === 'stroke' ? 'Stroke Eraser' : eraserMode === 'partial' ? 'Pixel Eraser' : 'Erase Highlighter Only'})`}
           >
-            <Eraser className="w-4 h-4" />
+            <CleanEraserIcon className="w-4 h-4" />
           </button>
         </div>
 

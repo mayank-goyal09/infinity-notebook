@@ -9,6 +9,7 @@ import {
   LassoSelect,
   Workflow,
   Check,
+  Type,
 } from 'lucide-react';
 import { ToolType } from '../../types/document';
 
@@ -19,6 +20,8 @@ interface ExcalidrawMoreToolsMenuProps {
   onSelectTool: (tool: ToolType) => void;
   isDrawToShape: boolean;
   onToggleDrawToShape: () => void;
+  isDrawToText?: boolean;
+  onToggleDrawToText?: () => void;
   onOpenInsertImage: () => void;
   onOpenWebEmbed: () => void;
   onOpenMermaid: () => void;
@@ -31,6 +34,8 @@ export const ExcalidrawMoreToolsMenu: React.FC<ExcalidrawMoreToolsMenuProps> = (
   onSelectTool,
   isDrawToShape,
   onToggleDrawToShape,
+  isDrawToText,
+  onToggleDrawToText,
   onOpenInsertImage,
   onOpenWebEmbed,
   onOpenMermaid,
@@ -105,6 +110,28 @@ export const ExcalidrawMoreToolsMenu: React.FC<ExcalidrawMoreToolsMenuProps> = (
           <Code2 className="w-4 h-4 text-stone-500" />
           <span>Web Embed</span>
         </div>
+      </button>
+
+      {/* 4b. Draw to text (Handwriting Recognition) */}
+      <button
+        onClick={() => {
+          onToggleDrawToText?.();
+          onClose();
+        }}
+        className={`px-3.5 py-2 flex items-center justify-between transition-colors ${
+          isDrawToText
+            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-medium'
+            : 'text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800'
+        }`}
+      >
+        <div className="flex items-center gap-2.5">
+          <Type className="w-4 h-4 text-blue-500" />
+          <div className="flex items-center gap-1.5">
+            <span>Draw to text (Handwriting)</span>
+            {isDrawToText && <Check className="w-3 h-3 text-blue-500" />}
+          </div>
+        </div>
+        <span className="text-[10px] text-stone-400 font-mono">Shift+H</span>
       </button>
 
       {/* 4. Draw to shape */}

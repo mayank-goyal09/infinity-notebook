@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { ToolType, ShapeType, PenConfig } from '../../types/document';
 import { ExcalidrawMoreToolsMenu } from './ExcalidrawMoreToolsMenu';
+import { CleanEraserIcon } from '../common/CleanEraserIcon';
 
 interface ExcalidrawTopBarProps {
   activeTool: ToolType;
@@ -39,6 +40,8 @@ interface ExcalidrawTopBarProps {
   onInsertImage?: () => void;
   isDrawToShape: boolean;
   onToggleDrawToShape: () => void;
+  isDrawToText?: boolean;
+  onToggleDrawToText?: () => void;
   onOpenWebEmbed: () => void;
   onOpenMermaid: () => void;
 }
@@ -58,6 +61,8 @@ export const ExcalidrawTopBar: React.FC<ExcalidrawTopBarProps> = ({
   onInsertImage,
   isDrawToShape,
   onToggleDrawToShape,
+  isDrawToText,
+  onToggleDrawToText,
   onOpenWebEmbed,
   onOpenMermaid,
 }) => {
@@ -261,7 +266,7 @@ export const ExcalidrawTopBar: React.FC<ExcalidrawTopBarProps> = ({
           }`}
           title="Eraser — E or 0"
         >
-          <Eraser className="w-4 h-4" />
+          <CleanEraserIcon className="w-4 h-4" />
           <span className="absolute bottom-0.5 right-1 text-[8px] font-mono text-stone-400 opacity-60">0</span>
         </button>
 
@@ -326,6 +331,8 @@ export const ExcalidrawTopBar: React.FC<ExcalidrawTopBarProps> = ({
             onSelectTool={onSelectTool}
             isDrawToShape={isDrawToShape}
             onToggleDrawToShape={onToggleDrawToShape}
+            isDrawToText={isDrawToText}
+            onToggleDrawToText={onToggleDrawToText}
             onOpenInsertImage={() => onInsertImage?.()}
             onOpenWebEmbed={onOpenWebEmbed}
             onOpenMermaid={onOpenMermaid}

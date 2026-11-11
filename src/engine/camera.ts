@@ -252,6 +252,48 @@ export class CameraEngine {
     this.zoomAnimFrameId = requestAnimationFrame(step);
   }
 
+  /**
+   * Smoothly pans and sets zoom so a specific doc coordinate is centered in the viewport.
+   */
+  public smoothCenterAt(
+    docX: number,
+    docY: number,
+    targetZoom = 1.0,
+    viewportWidth: number,
+    viewportHeight: number,
+    durationMs = 260
+  ) {
+    this.stopInertia();
+    this.stopZoomAnimation();
+    const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, targetZoom));
+    const targetX = viewportWidth / 2 - docX * clampedZoom;
+    const targetY = viewportHeight / 2 - docY * clampedZoom;
+
+    const startZoom = this.state.zoom;
+    const startX = this.state.x;
+    const startY = this.state.y;
+    const startTime = performance.now();
+
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      const ease = 1 - Math.pow(1 - progress, 3);
+
+      this.state.zoom = startZoom + (clampedZoom - startZoom) * ease;
+      this.state.x = startX + (targetX - startX) * ease;
+      this.state.y = startY + (targetY - startY) * ease;
+      this.emitChange();
+
+      if (progress < 1) {
+        this.zoomAnimFrameId = requestAnimationFrame(step);
+      } else {
+        this.zoomAnimFrameId = null;
+      }
+    };
+
+    this.zoomAnimFrameId = requestAnimationFrame(step);
+  }
+
   private emitChange() {
     if (this.onChange) {
       this.onChange({ ...this.state });

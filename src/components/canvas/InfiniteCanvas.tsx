@@ -1,4 +1,6 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { recognizeStrokeObjects, createTextFromHandwriting } from '../../engine/handwritingToText';
+import { Sparkles, Crosshair } from 'lucide-react';
 import {
   NotebookDocument,
   PenConfig,
@@ -229,6 +231,7 @@ interface InfiniteCanvasProps {
   onCursorDocMove?: (pt: { x: number; y: number }) => void;
   onViewportCenterChange?: (pt: { x: number; y: number }) => void;
   isDrawToShape?: boolean;
+  isDrawToText?: boolean;
   onChangeCanvasBg?: (bg: string) => void;
 }
 
@@ -283,6 +286,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   onCursorDocMove,
   onViewportCenterChange,
   isDrawToShape,
+  isDrawToText = false,
   onChangeCanvasBg,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -416,6 +420,70 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     clickToInkSettings.enabled ? 'armed' : 'idle'
   );
 
+  const [isConvertingHandwriting, setIsConvertingHandwriting] = useState(false);
+  const drawToTextBufferRef = useRef<StrokeObject[]>([]);
+  const drawToTextTimerRef = useRef<number | null>(null);
+  const activeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeStickyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const docRef = useRef(doc);
+  docRef.current = doc;
+  useEffect(() => {
+    docRef.current = doc;
+  }, [doc]);
+
+  // Memoize selected stroke objects to avoid O(N*M) scans on every render
+  const selectedStrokes = useMemo(() => {
+    if (selection.selectedIds.length === 0) return [];
+    const selSet = new Set(selection.selectedIds);
+    return doc.objects.filter((o) => selSet.has(o.id) && o.type === 'stroke') as StrokeObject[];
+  }, [doc.objects, selection.selectedIds]);
+
+  // Convert selected handwriting strokes to native TextObject
+  const handleConvertSelectedStrokes = async (targetStrokes?: StrokeObject[]) => {
+    const currentDoc = docRef.current;
+    const target = (targetStrokes && targetStrokes.length > 0)
+      ? targetStrokes
+      : (currentDoc.objects.filter(
+          (o) => selection.selectedIds.includes(o.id) && o.type === 'stroke'
+        ) as StrokeObject[]);
+
+    if (target.length === 0) return;
+
+    setIsConvertingHandwriting(true);
+    try {
+      const result = await recognizeStrokeObjects(target);
+      if (result && result.text.trim()) {
+        const latestDoc = docRef.current;
+        const activePage = latestDoc.pages.find((p) => p.id === latestDoc.activePageId) || latestDoc.pages[0];
+        const fontColor = target[0]?.color || (theme === 'dark' ? '#f4f4f5' : '#1e1e1e');
+        const newText = createTextFromHandwriting(
+          result,
+          activePage ? activePage.id : null,
+          fontColor,
+          textConfig?.fontFamily || 'Caveat, cursive'
+        );
+
+        const targetIds = new Set(target.map((s) => s.id));
+        const remainingObjects = latestDoc.objects.filter((o) => !targetIds.has(o.id));
+        const updatedObjects = [...remainingObjects, newText];
+
+        onUpdateDocument({ ...latestDoc, objects: updatedObjects }, true);
+        onSelectIds?.([newText.id]);
+        setSelection({
+          selectedIds: [newText.id],
+          bounds: { x: newText.x, y: newText.y, width: newText.width, height: newText.height },
+          mode: 'idle',
+        });
+        scheduleDocRedraw();
+      }
+    } catch (err) {
+      console.error('Failed to convert handwriting to text:', err);
+    } finally {
+      setIsConvertingHandwriting(false);
+    }
+  };
+
   // Inline Text Editor
   const [editingTextObj, setEditingTextObj] = useState<{
     id: string;
@@ -547,6 +615,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     if (!docCanvas || !overlayCanvas) return;
 
     const camera = cameraEngineRef.current.getState();
+    const currentDoc = docRef.current || doc;
 
     // Layer 0: Background Canvas (Fill, spreadsheet grid lines, and page frames)
     if (bgCanvas) {
@@ -557,8 +626,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           bgCanvas.width,
           bgCanvas.height,
           camera,
-          doc.pages,
-          doc.currentMode,
+          currentDoc.pages,
+          currentDoc.currentMode,
           theme,
           canvasBg
         );
@@ -573,10 +642,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
     // Layer 2: Transparent Document Objects Canvas (Strokes, shapes, text, images - excludes tables rendered by Layer 1 HTML overlay)
     const pending = pendingCommittedStrokeRef.current;
-    if (pending && doc.objects.some((o) => o.id === pending.id)) {
+    if (pending && currentDoc.objects.some((o) => o.id === pending.id)) {
       pendingCommittedStrokeRef.current = null;
     }
-    const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || doc.objects;
+    const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || currentDoc.objects;
     const objectsWithoutEditing = editingTextObj
       ? baseObjects.filter((o) => o.id !== editingTextObj.id)
       : (editingStickyObj ? baseObjects.filter((o) => o.id !== editingStickyObj.id) : baseObjects);
@@ -591,9 +660,9 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       docCanvas.width,
       docCanvas.height,
       camera,
-      doc.pages,
+      currentDoc.pages,
       canvasObjectsToRender,
-      doc.currentMode,
+      currentDoc.currentMode,
       theme,
       canvasBg,
       true // skipBackground = true (100% transparent so sketches appear ON TOP of Layer 1 tables!)
@@ -642,7 +711,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         mode: doc.currentMode,
       });
     }
-  }, [doc, theme, canvasBg, selection, clickToInkState, activeTool, onStatsUpdate, eraserSize, editingTextObj, editingStickyObj, selectedTableId]);
+  }, [doc, theme, canvasBg, selection, clickToInkState, activeTool, eraserSize, editingTextObj, editingStickyObj, selectedTableId]);
+
+  const renderSceneRef = useRef(renderScene);
+  renderSceneRef.current = renderScene;
 
   // Ultra-fast document redraw throttled by requestAnimationFrame (120 FPS max 1 redraw per frame)
   const scheduleDocRedraw = useCallback(() => {
@@ -653,6 +725,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       const docCanvas = docCanvasRef.current;
       if (!docCanvas) return;
       const camera = cameraEngineRef.current.getState();
+      const currentDoc = docRef.current || doc;
 
       if (bgCanvas) {
         const bgCtx = bgCanvas.getContext('2d');
@@ -662,8 +735,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             bgCanvas.width,
             bgCanvas.height,
             camera,
-            doc.pages,
-            doc.currentMode,
+            currentDoc.pages,
+            currentDoc.currentMode,
             theme,
             canvasBg
           );
@@ -673,10 +746,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       const docCtx = docCanvas.getContext('2d');
       if (!docCtx) return;
       const pending = pendingCommittedStrokeRef.current;
-      if (pending && doc.objects.some((o) => o.id === pending.id)) {
+      if (pending && currentDoc.objects.some((o) => o.id === pending.id)) {
         pendingCommittedStrokeRef.current = null;
       }
-      const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || doc.objects;
+      const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || currentDoc.objects;
       const objectsWithoutEditing = editingTextObj
         ? baseObjects.filter((o) => o.id !== editingTextObj.id)
         : (editingStickyObj ? baseObjects.filter((o) => o.id !== editingStickyObj.id) : baseObjects);
@@ -690,9 +763,9 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         docCanvas.width,
         docCanvas.height,
         camera,
-        doc.pages,
+        currentDoc.pages,
         canvasObjectsToRender,
-        doc.currentMode,
+        currentDoc.currentMode,
         theme,
         canvasBg,
         true // skipBackground = true
@@ -797,13 +870,23 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     }
   }, []);
 
-  // Camera change listener & session persistence
+  const onStatsUpdateRef = useRef(onStatsUpdate);
+  useEffect(() => {
+    onStatsUpdateRef.current = onStatsUpdate;
+  }, [onStatsUpdate]);
+
+  const onViewportCenterChangeRef = useRef(onViewportCenterChange);
+  useEffect(() => {
+    onViewportCenterChangeRef.current = onViewportCenterChange;
+  }, [onViewportCenterChange]);
+
+  // Camera change listener & session persistence (run ONCE on mount to prevent infinite setState loops)
   const saveCameraTimerRef = useRef<number | null>(null);
   useEffect(() => {
     cameraEngineRef.current.setOnChange(() => {
       const state = cameraEngineRef.current.getState();
       setCameraState({ ...state });
-      onStatsUpdate?.((prev: PerformanceStats) => ({
+      onStatsUpdateRef.current?.((prev: PerformanceStats) => ({
         ...prev,
         zoomPercent: Math.round(state.zoom * 100),
       }));
@@ -811,7 +894,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       if (container) {
         const cx = Math.round((container.clientWidth / 2 - state.x) / state.zoom);
         const cy = Math.round((container.clientHeight / 2 - state.y) / state.zoom);
-        onViewportCenterChange?.({ x: cx, y: cy });
+        onViewportCenterChangeRef.current?.({ x: cx, y: cy });
       }
       if (saveCameraTimerRef.current !== null) {
         window.clearTimeout(saveCameraTimerRef.current);
@@ -821,12 +904,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           localStorage.setItem('infinity_last_camera', JSON.stringify(state));
         } catch {}
       }, 300);
-      renderScene();
+      renderSceneRef.current?.();
     });
 
     // Synchronize initial zoom stat with parent on mount immediately
     const initialCam = cameraEngineRef.current.getState();
-    onStatsUpdate?.((prev: PerformanceStats) => ({
+    onStatsUpdateRef.current?.((prev: PerformanceStats) => ({
       ...prev,
       zoomPercent: Math.round(initialCam.zoom * 100),
     }));
@@ -855,7 +938,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         window.clearTimeout(saveCameraTimerRef.current);
       }
     };
-  }, [renderScene, onViewportCenterChange, onStatsUpdate]);
+  }, []);
 
   const handleUpdateTable = (updatedTable: AccountingTableObject) => {
     const updatedObjects = doc.objects.map((obj) =>
@@ -1212,6 +1295,21 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       livePointsRef.current = [];
       liveStrokeConfigRef.current = null;
       renderScene(); // doc + overlay in the same task, same code path as every other redraw
+
+      // If Draw-to-Text mode is active, buffer and auto-recognize handwriting
+      if (isDrawToText) {
+        drawToTextBufferRef.current.push(newStroke);
+        if (drawToTextTimerRef.current !== null) {
+          window.clearTimeout(drawToTextTimerRef.current);
+        }
+        drawToTextTimerRef.current = window.setTimeout(() => {
+          const buffer = [...drawToTextBufferRef.current];
+          drawToTextBufferRef.current = [];
+          if (buffer.length > 0) {
+            handleConvertSelectedStrokes(buffer);
+          }
+        }, 750);
+      }
 
       onUpdateDocument(
         {
@@ -1620,6 +1718,24 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     try {
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     } catch {}
+
+    // Auto-commit any active inline text/sticky editor immediately when pen/eraser touches down
+    if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser') {
+      if (editingTextObj) {
+        if (activeTextareaRef.current) {
+          handleCommitText(activeTextareaRef.current.value);
+        } else {
+          setEditingTextObj(null);
+        }
+      }
+      if (editingStickyObj) {
+        if (activeStickyTextareaRef.current) {
+          handleCommitStickyText(activeStickyTextareaRef.current.value);
+        } else {
+          setEditingStickyObj(null);
+        }
+      }
+    }
 
     // Middle-click or Space+click triggers panning
     if (e.button === 1 || isSpacePressedRef.current || activeTool === 'hand') {
@@ -2494,8 +2610,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           bounds: { x: minX, y: minY, width: w, height: h },
           mode: 'moving',
         });
-        onSelectIds?.(selIds);
-        renderScene();
+        // Performance: render overlay only, defer onSelectIds to pointerup
+        renderOverlayOnly();
         return;
       }
 
@@ -2779,13 +2895,16 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         selectionStartRef.current = null;
         if (selection.selectedIds.length > 0) {
           const selectedObjs = doc.objects.filter((o) => selection.selectedIds.includes(o.id));
+          const finalBounds = getEnclosingBounds(selectedObjs);
           setSelection({
             selectedIds: selection.selectedIds,
-            bounds: getEnclosingBounds(selectedObjs),
+            bounds: finalBounds,
             mode: 'idle',
           });
+          onSelectIds?.(selection.selectedIds);
         } else {
           setSelection({ selectedIds: [], bounds: null, mode: 'idle' });
+          onSelectIds?.([]);
         }
       }
       renderScene();
@@ -3288,6 +3407,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       } else if (e.ctrlKey && (e.key === '0' || e.key === '1')) {
         e.preventDefault();
         handleCustomZoomReset();
+      } else if (e.key === 'Home' || (e.shiftKey && e.code === 'KeyC')) {
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea') {
+          e.preventDefault();
+          handleNavigateCenter();
+        }
       }
     };
 
@@ -3347,6 +3472,111 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         viewportHeight,
         80,
         240
+      );
+    };
+
+    const handleNavigateCenter = () => {
+      const container = containerRef.current;
+      if (!container) return;
+      const viewportWidth = container.clientWidth || window.innerWidth;
+      const viewportHeight = container.clientHeight || window.innerHeight;
+
+      // 1. If accounting tables exist (spreadsheets), center on the tables
+      const tables = doc.objects.filter((obj): obj is AccountingTableObject => obj.type === 'table');
+      if (tables.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        tables.forEach((tbl) => {
+          const w = typeof tbl.width === 'number' && !isNaN(tbl.width) ? tbl.width : 600;
+          const h = typeof tbl.height === 'number' && !isNaN(tbl.height) ? tbl.height : 400;
+          minX = Math.min(minX, tbl.x);
+          minY = Math.min(minY, tbl.y);
+          maxX = Math.max(maxX, tbl.x + w);
+          maxY = Math.max(maxY, tbl.y + h);
+        });
+
+        if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
+          const targetCenterX = minX + (maxX - minX) / 2;
+          const targetCenterY = minY + (maxY - minY) / 2;
+          const totalWidth = Math.max(100, maxX - minX);
+          const totalHeight = Math.max(100, maxY - minY);
+
+          const availW = Math.max(200, viewportWidth - 160);
+          const availH = Math.max(200, viewportHeight - 160);
+          const fitScale = Math.min(availW / totalWidth, availH / totalHeight);
+          // Keep zoom legible (never down to 10%)
+          const targetZoom = Math.min(1.0, Math.max(0.70, fitScale));
+
+          cameraEngineRef.current.smoothCenterAt(
+            targetCenterX,
+            targetCenterY,
+            targetZoom,
+            viewportWidth,
+            viewportHeight,
+            260
+          );
+          return;
+        }
+      }
+
+      // 2. If any other objects exist (notes, shapes, strokes, embeds)
+      if (doc.objects.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        doc.objects.forEach((obj) => {
+          const w = typeof obj.width === 'number' && !isNaN(obj.width) ? obj.width : 200;
+          const h = typeof obj.height === 'number' && !isNaN(obj.height) ? obj.height : 200;
+          minX = Math.min(minX, obj.x);
+          minY = Math.min(minY, obj.y);
+          maxX = Math.max(maxX, obj.x + w);
+          maxY = Math.max(maxY, obj.y + h);
+        });
+
+        if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
+          const targetCenterX = minX + (maxX - minX) / 2;
+          const targetCenterY = minY + (maxY - minY) / 2;
+          const totalWidth = Math.max(100, maxX - minX);
+          const totalHeight = Math.max(100, maxY - minY);
+
+          const availW = Math.max(200, viewportWidth - 160);
+          const availH = Math.max(200, viewportHeight - 160);
+          const fitScale = Math.min(availW / totalWidth, availH / totalHeight);
+          const targetZoom = Math.min(1.0, Math.max(0.60, fitScale));
+
+          cameraEngineRef.current.smoothCenterAt(
+            targetCenterX,
+            targetCenterY,
+            targetZoom,
+            viewportWidth,
+            viewportHeight,
+            260
+          );
+          return;
+        }
+      }
+
+      // 3. Fallback to first page frame if present
+      if (doc.pages && doc.pages.length > 0) {
+        const p = doc.pages[0];
+        const targetCenterX = p.x + p.width / 2;
+        const targetCenterY = p.y + p.height / 2;
+        cameraEngineRef.current.smoothCenterAt(
+          targetCenterX,
+          targetCenterY,
+          1.0,
+          viewportWidth,
+          viewportHeight,
+          260
+        );
+        return;
+      }
+
+      // 4. Default: Center of canvas at (0, 0)
+      cameraEngineRef.current.smoothCenterAt(
+        0,
+        0,
+        1.0,
+        viewportWidth,
+        viewportHeight,
+        260
       );
     };
 
@@ -3466,6 +3696,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     window.addEventListener('canvas:zoom-out', handleCustomZoomOut);
     window.addEventListener('canvas:zoom-reset', handleCustomZoomReset);
     window.addEventListener('canvas:zoom-fit', handleCustomZoomFit);
+    window.addEventListener('canvas:navigate-center', handleNavigateCenter);
     window.addEventListener('canvas:fit-table', handleFitTable);
 
     return () => {
@@ -3478,11 +3709,35 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       window.removeEventListener('canvas:zoom-out', handleCustomZoomOut);
       window.removeEventListener('canvas:zoom-reset', handleCustomZoomReset);
       window.removeEventListener('canvas:zoom-fit', handleCustomZoomFit);
+      window.removeEventListener('canvas:navigate-center', handleNavigateCenter);
       window.removeEventListener('canvas:fit-table', handleFitTable);
     };
   }, [doc.objects]);
 
   const allTableObjects = doc.objects.filter((obj): obj is AccountingTableObject => obj.type === 'table');
+
+  const isContentOffscreen = React.useMemo(() => {
+    if (doc.objects.length === 0) return false;
+    const vpW = containerRef.current?.clientWidth || window.innerWidth;
+    const vpH = containerRef.current?.clientHeight || window.innerHeight;
+    const docLeft = -cameraState.x / cameraState.zoom;
+    const docTop = -cameraState.y / cameraState.zoom;
+    const docRight = (vpW - cameraState.x) / cameraState.zoom;
+    const docBottom = (vpH - cameraState.y) / cameraState.zoom;
+
+    const anyVisible = doc.objects.some((obj) => {
+      const w = obj.width || 400;
+      const h = obj.height || 300;
+      return (
+        obj.x + w >= docLeft &&
+        obj.x <= docRight &&
+        obj.y + h >= docTop &&
+        obj.y <= docBottom
+      );
+    });
+
+    return !anyVisible;
+  }, [doc.objects, cameraState]);
 
   return (
     <div
@@ -3591,12 +3846,20 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             left: editingTextObj.x * cameraState.zoom + cameraState.x,
             top: editingTextObj.y * cameraState.zoom + cameraState.y,
             zIndex: 60,
+            pointerEvents: activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current ? 'none' : 'auto',
           }}
-          onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+            e.stopPropagation();
+          }}
+          onPointerDown={(e) => {
+            if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+            e.stopPropagation();
+          }}
         >
           <textarea
             ref={(el) => {
+              activeTextareaRef.current = el;
               if (el) {
                 el.style.height = 'auto';
                 el.style.height = `${Math.max(28, el.scrollHeight)}px`;
@@ -3656,6 +3919,44 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         </div>
       )}
 
+      {/* Quick Action Pill: Convert Selected Handwriting to Text */}
+      {selectedStrokes.length > 0 &&
+        selection.bounds &&
+        !selectionStartRef.current &&
+        !isDraggingObjectsRef.current &&
+        !isResizingRef.current &&
+        activeTool === 'select' && (
+          <div
+            key="convert-to-text-pill"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              left: Math.max(16, selection.bounds.x * cameraState.zoom + cameraState.x),
+              top: Math.max(16, (selection.bounds.y - 42) * cameraState.zoom + cameraState.y),
+              zIndex: 65,
+            }}
+            className="select-none"
+          >
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleConvertSelectedStrokes(selectedStrokes);
+              }}
+              disabled={isConvertingHandwriting}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-full shadow-lg hover:shadow-xl transition-transform hover:scale-105 cursor-pointer disabled:opacity-60"
+              title="Convert handwritten strokes into typed text"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${isConvertingHandwriting ? 'animate-spin' : ''}`} />
+              <span>{isConvertingHandwriting ? 'Recognizing...' : 'Convert to Text'}</span>
+            </button>
+          </div>
+        )}
+
       {/* Layer 5: Interactive Sticky Note Inline Editor (Centered, Styled, Excalidraw Image 5) */}
       {editingStickyObj && (
         <div
@@ -3670,6 +3971,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             padding: `${16 * cameraState.zoom}px`,
             boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
             zIndex: 60,
+            pointerEvents: activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current ? 'none' : 'auto',
             boxSizing: 'border-box',
             display: 'flex',
             flexDirection: 'column',
@@ -3680,10 +3982,19 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                 ? 'flex-end'
                 : 'center',
           }}
-          onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+            e.stopPropagation();
+          }}
+          onPointerDown={(e) => {
+            if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+            e.stopPropagation();
+          }}
         >
           <textarea
+            ref={(el) => {
+              activeStickyTextareaRef.current = el;
+            }}
             autoFocus
             defaultValue={editingStickyObj.text}
             placeholder=""
@@ -3734,6 +4045,18 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             {editingStickyObj.dateLabel || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
           </span>
         </div>
+      )}
+
+      {/* Off-screen Work Area Indicator / Quick Return Button */}
+      {isContentOffscreen && doc.objects.length > 0 && (
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('canvas:navigate-center'))}
+          className="fixed bottom-14 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 bg-blue-600/95 hover:bg-blue-700 text-white rounded-full text-xs font-semibold shadow-xl backdrop-blur-md flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200 cursor-pointer transition-all hover:scale-105 active:scale-95 pointer-events-auto select-none"
+          title="Jump directly to your spreadsheets & work area (Home key)"
+        >
+          <Crosshair className="w-3.5 h-3.5 animate-pulse text-blue-200" />
+          <span>Work area is off-screen — Click to return to spreadsheets</span>
+        </button>
       )}
     </div>
   );

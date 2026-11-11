@@ -19,6 +19,7 @@ import {
   ZoomOut,
   RotateCcw,
   Settings,
+  Crosshair,
 } from 'lucide-react';
 
 interface ExcalidrawMenuProps {
@@ -241,6 +242,21 @@ export const ExcalidrawMenu: React.FC<ExcalidrawMenuProps> = ({
               <span>Reset Zoom (100%)</span>
             </div>
             <span className="text-[10px] text-stone-400 font-mono">Ctrl + 0</span>
+          </button>
+
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('canvas:navigate-center'));
+              setIsOpen(false);
+            }}
+            className="px-3.5 py-1.5 flex items-center justify-between text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+            title="Center on your spreadsheets & work area"
+          >
+            <div className="flex items-center gap-2.5">
+              <Crosshair className="w-4 h-4 text-stone-500" />
+              <span>Navigate to Center</span>
+            </div>
+            <span className="text-[10px] text-stone-400 font-mono">Home</span>
           </button>
 
           <div className="my-1.5 border-t border-stone-200 dark:border-stone-800" />
