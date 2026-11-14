@@ -30,6 +30,36 @@ export interface ViewportRect {
 export class CanvasRenderer {
   private imageCache = new Map<string, HTMLImageElement>();
   private patternCache = new Map<string, CanvasPattern>();
+  private textLayoutCache = new Map<string, string[]>();
+  private static readonly TEXT_CACHE_MAX = 512;
+
+  /**
+   * Cached text wrapping – returns wrapped lines from cache when the text
+   * properties haven't changed, avoiding expensive per-word measureText() calls
+   * on every animation frame.
+   */
+  private getCachedWrappedLines(
+    text: string,
+    maxWidth: number,
+    fontSize: number,
+    fontFamily: string,
+    bold: boolean,
+    italic: boolean
+  ): string[] {
+    const key = `${text}\x00${maxWidth}\x00${fontSize}\x00${fontFamily}\x00${bold}\x00${italic}`;
+    const cached = this.textLayoutCache.get(key);
+    if (cached) return cached;
+
+    const lines = wrapTextLines(text, maxWidth, fontSize, fontFamily, bold, italic);
+
+    // Evict oldest entries when cache grows too large
+    if (this.textLayoutCache.size >= CanvasRenderer.TEXT_CACHE_MAX) {
+      const first = this.textLayoutCache.keys().next().value;
+      if (first !== undefined) this.textLayoutCache.delete(first);
+    }
+    this.textLayoutCache.set(key, lines);
+    return lines;
+  }
 
   /**
    * Helper: Cache and create Excalidraw-style hachure / cross-hatch fill patterns
@@ -1136,7 +1166,7 @@ export class CanvasRenderer {
     const boxWidth = textObj.width || 240;
     const boxHeight = textObj.height || 48;
     const maxContentWidth = Math.max(30, boxWidth - 12);
-    const lines = wrapTextLines(
+    const lines = this.getCachedWrappedLines(
       textObj.text || '',
       maxContentWidth,
       textObj.fontSize,
@@ -1238,7 +1268,7 @@ export class CanvasRenderer {
 
     // Gracefully word-wrap text to fit within sticky note width (width - 32)
     const maxContentWidth = Math.max(30, width - 32);
-    const lines = wrapTextLines(text || '', maxContentWidth, fontSize, fontFamily);
+    const lines = this.getCachedWrappedLines(text || '', maxContentWidth, fontSize, fontFamily, false, false);
     const lineHeight = fontSize * 1.35;
     const totalTextHeight = lines.length * lineHeight;
 
