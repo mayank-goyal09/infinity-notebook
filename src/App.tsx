@@ -713,21 +713,36 @@ export default function App() {
       performance.mark('storage-save-end');
       performance.measure('autosave-storage-save', 'storage-save-start', 'storage-save-end');
 
-      performance.mark('sync-doc-start');
-      await syncEngineRef.current.syncDocument(docToSave);
-      performance.mark('sync-doc-end');
-      performance.measure('autosave-sync-doc', 'sync-doc-start', 'sync-doc-end');
-
       performance.mark('autosave-end');
       performance.measure('autosave-total', 'autosave-start', 'autosave-end');
 
       const storageDuration = performance.getEntriesByName('autosave-storage-save').pop()?.duration.toFixed(2);
-      const syncDuration = performance.getEntriesByName('autosave-sync-doc').pop()?.duration.toFixed(2);
       const totalDuration = performance.getEntriesByName('autosave-total').pop()?.duration.toFixed(2);
 
       console.log(
-        `[Autosave Profile (Idle)] Total: ${totalDuration}ms | storage: ${storageDuration}ms | sync: ${syncDuration}ms | Provider: ${syncStatus.provider} | Objects: ${docToSave.objects.length}`
+        `[Autosave Profile (Idle)] Local Storage: ${storageDuration}ms | Total: ${totalDuration}ms | Objects: ${docToSave.objects.length}`
       );
+
+      // Decouple syncEngine out of the hot path: run on a separate idle turn and only if provider is active
+      if (syncStatus.provider !== 'none') {
+        const scheduleSyncIdle =
+          typeof window.requestIdleCallback === 'function'
+            ? window.requestIdleCallback
+            : (cb: () => void) => window.setTimeout(cb, 200);
+
+        scheduleSyncIdle(async () => {
+          try {
+            performance.mark('sync-doc-start');
+            await syncEngineRef.current.syncDocument(docToSave);
+            performance.mark('sync-doc-end');
+            performance.measure('autosave-sync-doc', 'sync-doc-start', 'sync-doc-end');
+            const syncDuration = performance.getEntriesByName('autosave-sync-doc').pop()?.duration.toFixed(2);
+            console.log(`[SyncEngine (Idle Background)] Synced in ${syncDuration}ms`);
+          } catch (syncErr) {
+            console.error('Background sync error:', syncErr);
+          }
+        });
+      }
     } catch (err) {
       console.error('Autosave error:', err);
     }
