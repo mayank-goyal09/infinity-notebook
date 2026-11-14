@@ -2139,6 +2139,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       const dy = screenY - panStartRef.current.y;
       cameraEngineRef.current.panBy(dx, dy);
       panStartRef.current = { x: screenX, y: screenY };
+      scheduleDocRedraw();
       return;
     }
 
