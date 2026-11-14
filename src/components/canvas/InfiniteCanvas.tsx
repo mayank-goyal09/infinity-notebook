@@ -555,7 +555,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   const renderOverlayOnly = useCallback(() => {
     const overlayCanvas = overlayCanvasRef.current;
     if (!overlayCanvas) return;
-    const overlayCtx = overlayCanvas.getContext('2d');
+    const overlayCtx = overlayCanvas.getContext('2d', { desynchronized: true });
     if (!overlayCtx) return;
     const camera = cameraEngineRef.current.getState();
 
@@ -636,7 +636,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     }
 
     const docCtx = docCanvas.getContext('2d');
-    const overlayCtx = overlayCanvas.getContext('2d');
+    const overlayCtx = overlayCanvas.getContext('2d', { desynchronized: true });
     if (!docCtx || !overlayCtx) return;
 
     const t0 = performance.now();
@@ -1341,7 +1341,29 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
       livePointsRef.current = [];
       liveStrokeConfigRef.current = null;
-      renderScene(); // doc + overlay in the same task, same code path as every other redraw
+
+      // Incremental Stroke Baking:
+      // If no page frame was added, bake the finished stroke directly onto docCanvas!
+      // This completely eliminates the O(N) full document clearRect and object iteration on pen lift.
+      if (updatedPages.length === doc.pages.length) {
+        const docCanvas = docCanvasRef.current;
+        const camera = cameraEngineRef.current.getState();
+        if (docCanvas) {
+          const docCtx = docCanvas.getContext('2d');
+          if (docCtx) {
+            docCtx.save();
+            docCtx.translate(camera.x, camera.y);
+            docCtx.scale(camera.zoom, camera.zoom);
+            rendererRef.current.renderStroke(docCtx, newStroke, camera.zoom, true);
+            docCtx.restore();
+          }
+          renderOverlayOnly();
+        } else {
+          renderScene();
+        }
+      } else {
+        renderScene();
+      }
 
       // If Draw-to-Text mode is active, buffer and auto-recognize handwriting
       if (isDrawToText) {
