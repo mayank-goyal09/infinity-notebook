@@ -299,13 +299,13 @@ export const FloatingPenPalette: React.FC<FloatingPenPaletteProps> = ({
         {/* Eraser Tool */}
         <div className="relative group">
           <button
-            onClick={() => onSelectTool(activeTool === 'eraser' ? 'pen' : 'eraser')}
+            onClick={() => onSelectTool('eraser')}
             className={`p-2 rounded-xl transition-all ${
               activeTool === 'eraser'
                 ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 shadow-sm'
                 : 'text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800'
             }`}
-            title={`Toggle Eraser — E or 0 (${eraserMode === 'stroke' ? 'Stroke Eraser' : eraserMode === 'partial' ? 'Pixel Eraser' : 'Erase Highlighter Only'})`}
+            title={`Eraser (${eraserMode === 'stroke' ? 'Stroke Eraser' : eraserMode === 'partial' ? 'Pixel Eraser' : 'Erase Highlighter Only'})`}
           >
             <CleanEraserIcon className="w-4 h-4" />
           </button>
