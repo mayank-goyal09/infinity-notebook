@@ -150,6 +150,7 @@ export class SyncEngine {
    * Trigger background sync of document
    */
   public async syncDocument(doc: NotebookDocument): Promise<boolean> {
+    const t0 = performance.now();
     if (this.status.provider === 'none') {
       return false;
     }
@@ -157,8 +158,11 @@ export class SyncEngine {
     this.updateStatus({ state: 'syncing', message: 'Syncing changes...' });
 
     try {
+      const tJson0 = performance.now();
       const serialized = JSON.stringify(doc);
+      const tJson = performance.now();
       const dataToSave = this.encryptionKey ? await this.encryptData(serialized) : serialized;
+      const tEnc = performance.now();
 
       if (this.status.provider === 'local_folder' && this.directoryHandle) {
         const fileHandle = await this.directoryHandle.getFileHandle(`${doc.id}.inb.json`, {
@@ -169,6 +173,11 @@ export class SyncEngine {
         await writable.close();
       }
 
+      const tDone = performance.now();
+      console.log(
+        `[syncEngine.syncDocument Timing] JSON.stringify: ${(tJson - tJson0).toFixed(1)}ms | encrypt: ${(tEnc - tJson).toFixed(1)}ms | write: ${(tDone - tEnc).toFixed(1)}ms | Total: ${(tDone - t0).toFixed(1)}ms`
+      );
+
       this.updateStatus({
         state: 'synced',
         lastSyncedAt: Date.now(),
@@ -177,6 +186,7 @@ export class SyncEngine {
       });
       return true;
     } catch (err) {
+      console.error('[syncEngine error]', err);
       this.updateStatus({
         state: 'error',
         message: `Sync failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
