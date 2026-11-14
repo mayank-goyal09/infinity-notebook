@@ -321,6 +321,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   // Laser Pointer Trail
   const laserTrailRef = useRef<LaserTrailPoint[]>([]);
   const isSpacePressedRef = useRef(false);
+  const isStylusHardwareErasingRef = useRef(false);
 
   // Selection
   const [selection, setSelection] = useState<SelectionState>({
@@ -1750,7 +1751,26 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       return;
     }
 
-    // Right-click cancels inking
+    // Stylus Hardware Barrel Button or Eraser Tip (button 2 or 5, or buttons bitmask 32/2)
+    const isStylusEraser =
+      e.pointerType === 'pen' &&
+      (e.button === 2 || e.button === 5 || (e.buttons & 32) !== 0 || (e.buttons & 2) !== 0);
+
+    if (isStylusEraser) {
+      isStylusHardwareErasingRef.current = true;
+      isDrawingRef.current = true;
+      eraserModifiedRef.current = false;
+      activeEraserObjectsRef.current = [...doc.objects];
+      lastEraserDocPtRef.current = { x: docPt.x, y: docPt.y };
+      const modified = handleEraserAt(docPt.x, docPt.y);
+      if (modified) {
+        scheduleDocRedraw();
+      }
+      renderOverlayOnly();
+      return;
+    }
+
+    // Right-click cancels inking for mouse
     if (e.button === 2) {
       if (clickToInkFSMRef.current) {
         clickToInkFSMRef.current.handleContextMenu(e.nativeEvent);
@@ -2146,7 +2166,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     onCursorDocMove?.(docPt);
 
     // Fast overlay redraw for eraser: always updates cursor ring with 0ms delay at 120 FPS
-    if (activeTool === 'eraser') {
+    if (activeTool === 'eraser' || isStylusHardwareErasingRef.current) {
       renderOverlayOnly();
     }
 
@@ -2246,7 +2266,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     }
 
     // Eraser move (Interpolate along path for continuous 120 FPS gapless slicing)
-    if (isDrawingRef.current && activeTool === 'eraser') {
+    if (isDrawingRef.current && (activeTool === 'eraser' || isStylusHardwareErasingRef.current)) {
       const prevPt = lastEraserDocPtRef.current || docPt;
       const dist = Math.hypot(docPt.x - prevPt.x, docPt.y - prevPt.y);
       const radius = (eraserSize || 24) / cameraEngineRef.current.getState().zoom;
@@ -2755,7 +2775,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       return;
     }
 
-    if (activeTool === 'eraser') {
+    if (activeTool === 'eraser' || isStylusHardwareErasingRef.current) {
+      isStylusHardwareErasingRef.current = false;
       isDrawingRef.current = false;
       lastEraserDocPtRef.current = null;
       if (docRedrawRafRef.current !== null) {
@@ -3742,6 +3763,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   return (
     <div
       ref={containerRef}
+      onContextMenu={(e) => {
+        // Prevent default browser context menu so stylus barrel buttons work seamlessly
+        e.preventDefault();
+      }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -3750,7 +3775,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       onDragOver={handleDragOver}
       onPointerLeave={() => {
         cursorPosRef.current = null;
-        if (activeTool === 'eraser') {
+        if (activeTool === 'eraser' || isStylusHardwareErasingRef.current) {
+          isStylusHardwareErasingRef.current = false;
           if (isDrawingRef.current) {
             isDrawingRef.current = false;
             lastEraserDocPtRef.current = null;

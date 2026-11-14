@@ -205,7 +205,7 @@ export const ExcalidrawTopBar: React.FC<ExcalidrawTopBarProps> = ({
               ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 shadow-xs'
               : 'text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800'
           }`}
-          title="Draw / Pen tool — P or 7"
+          title="Draw / Pen tool — P, B, or 7"
         >
           <Pen className="w-4 h-4" />
           <span className="absolute bottom-0.5 right-1 text-[8px] font-mono text-stone-400 opacity-60">7</span>
@@ -258,13 +258,13 @@ export const ExcalidrawTopBar: React.FC<ExcalidrawTopBarProps> = ({
 
         {/* Eraser */}
         <button
-          onClick={() => onSelectTool('eraser')}
+          onClick={() => onSelectTool(activeTool === 'eraser' ? 'pen' : 'eraser')}
           className={`p-2 rounded-lg transition-colors relative group ${
             activeTool === 'eraser'
               ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 shadow-xs'
               : 'text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800'
           }`}
-          title="Eraser — E or 0"
+          title="Toggle Eraser — E or 0 (Pen Tablet shortcut)"
         >
           <CleanEraserIcon className="w-4 h-4" />
           <span className="absolute bottom-0.5 right-1 text-[8px] font-mono text-stone-400 opacity-60">0</span>

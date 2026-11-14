@@ -353,9 +353,14 @@ export default function App() {
 
 
   // Change active tool and cleanly clear selected objects when switching to drawing tools (pen, laser, eraser, shape, etc.)
+  const previousDrawingToolRef = useRef<ToolType>('pen');
 
   const handleSelectTool = (tool: ToolType) => {
-
+    if (activeTool !== 'eraser' && tool === 'eraser') {
+      previousDrawingToolRef.current = activeTool;
+    } else if (tool !== 'eraser') {
+      previousDrawingToolRef.current = tool;
+    }
     setActiveTool(tool);
 
     if (tool !== 'select') {
@@ -366,6 +371,18 @@ export default function App() {
 
     }
 
+  };
+
+  // Toggle Eraser tool (Excalidraw actionToggleEraserTool parity + Huion stylus button support)
+  const toggleEraserTool = () => {
+    if (activeTool === 'eraser') {
+      const targetTool =
+        previousDrawingToolRef.current === 'eraser' ? 'pen' : (previousDrawingToolRef.current || 'pen');
+      handleSelectTool(targetTool);
+    } else {
+      previousDrawingToolRef.current = activeTool;
+      handleSelectTool('eraser');
+    }
   };
 
 
@@ -1942,7 +1959,7 @@ export default function App() {
 
         setActiveShape('line');
 
-      } else if (key === 'p' || key === '7') {
+      } else if (key === 'p' || key === '7' || key === 'b') {
 
         handleSelectTool('pen');
 
@@ -1958,7 +1975,7 @@ export default function App() {
 
         handleSelectTool('laser');
 
-      } else if (key === 'b') {
+      } else if (key === 'g') {
 
         handleSelectTool('bucket');
 
@@ -1978,7 +1995,7 @@ export default function App() {
 
       } else if (key === 'e' || key === '0') {
 
-        handleSelectTool('eraser');
+        toggleEraserTool();
 
       } else if (key === 'escape') {
 
@@ -2108,7 +2125,7 @@ export default function App() {
 
       category: 'Drawing',
 
-      shortcut: 'B',
+      shortcut: 'G',
 
       icon: <span className="font-bold">🪣</span>,
 
