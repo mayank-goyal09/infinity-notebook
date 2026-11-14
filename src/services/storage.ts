@@ -50,13 +50,23 @@ export class StorageService {
   }
 
   public async saveDocument(doc: NotebookDocument): Promise<void> {
+    const t0 = performance.now();
     const db = await this.getDB();
+    const tDb = performance.now();
     return new Promise((resolve, reject) => {
       const tx = db.transaction([STORE_DOCS], 'readwrite');
       const store = tx.objectStore(STORE_DOCS);
+      const tStore = performance.now();
       const req = store.put({ ...doc, updatedAt: Date.now() });
+      const tPut = performance.now();
 
-      req.onsuccess = () => resolve();
+      req.onsuccess = () => {
+        const tSuccess = performance.now();
+        console.log(
+          `[storage.saveDocument Timing] getDB: ${(tDb - t0).toFixed(1)}ms | tx+store: ${(tStore - tDb).toFixed(1)}ms | store.put (sync clone/dispatch): ${(tPut - tStore).toFixed(1)}ms | async commit: ${(tSuccess - tPut).toFixed(1)}ms | Total: ${(tSuccess - t0).toFixed(1)}ms`
+        );
+        resolve();
+      };
       req.onerror = () => reject(req.error);
     });
   }
