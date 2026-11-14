@@ -666,42 +666,154 @@ export default function App() {
 
 
 
-  // Debounced Autosave
+  // Interaction-Aware Debounced Autosave (Never saves while drawing or interacting)
   const autosaveTimerRef = useRef<number | null>(null);
-  const saveDocumentDebounced = useCallback((documentToSave: NotebookDocument) => {
+  const idleCallbackIdRef = useRef<number | null>(null);
+  const pendingDocumentRef = useRef<NotebookDocument | null>(null);
+  const isPointerDownRef = useRef<boolean>(false);
+  const lastInteractionTimeRef = useRef<number>(0);
+
+  const QUIET_WINDOW_MS = 1500; // 1.5s quiet window after last stroke before autosave runs
+
+  // Flush any pending save immediately (e.g. on page hide or tab switch)
+  const flushPendingSave = useCallback(() => {
     if (autosaveTimerRef.current !== null) {
-      clearTimeout(autosaveTimerRef.current);
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (idleCallbackIdRef.current !== null) {
+      if (typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleCallbackIdRef.current);
+      } else {
+        window.clearTimeout(idleCallbackIdRef.current);
+      }
+      idleCallbackIdRef.current = null;
     }
 
-    autosaveTimerRef.current = window.setTimeout(async () => {
-      performance.mark('autosave-start');
-      const syncStatus = syncEngineRef.current.getStatus();
-      try {
-        performance.mark('storage-save-start');
-        await storageServiceRef.current.saveDocument(documentToSave);
-        performance.mark('storage-save-end');
-        performance.measure('autosave-storage-save', 'storage-save-start', 'storage-save-end');
+    const docToSave = pendingDocumentRef.current;
+    if (!docToSave) return;
+    pendingDocumentRef.current = null;
 
-        performance.mark('sync-doc-start');
-        await syncEngineRef.current.syncDocument(documentToSave);
-        performance.mark('sync-doc-end');
-        performance.measure('autosave-sync-doc', 'sync-doc-start', 'sync-doc-end');
-
-        performance.mark('autosave-end');
-        performance.measure('autosave-total', 'autosave-start', 'autosave-end');
-
-        const storageDuration = performance.getEntriesByName('autosave-storage-save').pop()?.duration.toFixed(2);
-        const syncDuration = performance.getEntriesByName('autosave-sync-doc').pop()?.duration.toFixed(2);
-        const totalDuration = performance.getEntriesByName('autosave-total').pop()?.duration.toFixed(2);
-
-        console.log(
-          `[Autosave Profile] Total: ${totalDuration}ms | storage.saveDocument: ${storageDuration}ms | syncEngine.syncDocument: ${syncDuration}ms | Provider: ${syncStatus.provider} (${syncStatus.state}) | Objects: ${documentToSave.objects.length}`
-        );
-      } catch (err) {
-        console.error('Autosave error:', err);
-      }
-    }, 600);
+    storageServiceRef.current.saveDocument(docToSave).catch((err) => {
+      console.error('Failed to flush save on pagehide:', err);
+    });
   }, []);
+
+  // Execute the actual save routine when verified idle
+  const executeAutosave = useCallback(async () => {
+    const docToSave = pendingDocumentRef.current;
+    if (!docToSave) return;
+    pendingDocumentRef.current = null;
+
+    performance.mark('autosave-start');
+    const syncStatus = syncEngineRef.current.getStatus();
+    try {
+      performance.mark('storage-save-start');
+      await storageServiceRef.current.saveDocument(docToSave);
+      performance.mark('storage-save-end');
+      performance.measure('autosave-storage-save', 'storage-save-start', 'storage-save-end');
+
+      performance.mark('sync-doc-start');
+      await syncEngineRef.current.syncDocument(docToSave);
+      performance.mark('sync-doc-end');
+      performance.measure('autosave-sync-doc', 'sync-doc-start', 'sync-doc-end');
+
+      performance.mark('autosave-end');
+      performance.measure('autosave-total', 'autosave-start', 'autosave-end');
+
+      const storageDuration = performance.getEntriesByName('autosave-storage-save').pop()?.duration.toFixed(2);
+      const syncDuration = performance.getEntriesByName('autosave-sync-doc').pop()?.duration.toFixed(2);
+      const totalDuration = performance.getEntriesByName('autosave-total').pop()?.duration.toFixed(2);
+
+      console.log(
+        `[Autosave Profile (Idle)] Total: ${totalDuration}ms | storage: ${storageDuration}ms | sync: ${syncDuration}ms | Provider: ${syncStatus.provider} | Objects: ${docToSave.objects.length}`
+      );
+    } catch (err) {
+      console.error('Autosave error:', err);
+    }
+  }, []);
+
+  const scheduleAutosave = useCallback(() => {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+
+      // 1. If pointer is actively down (mid-stroke) OR user was drawing < 1500ms ago:
+      // RESCHEDULE! Never block the main thread while drawing!
+      const timeSinceInteraction = performance.now() - lastInteractionTimeRef.current;
+      if (isPointerDownRef.current || timeSinceInteraction < QUIET_WINDOW_MS) {
+        scheduleAutosave();
+        return;
+      }
+
+      // 2. Request an idle period from the browser to run persistence
+      const handleIdleRun = () => {
+        idleCallbackIdRef.current = null;
+        // Re-verify that user did not begin drawing during the idle dispatch
+        if (isPointerDownRef.current || performance.now() - lastInteractionTimeRef.current < QUIET_WINDOW_MS) {
+          scheduleAutosave();
+          return;
+        }
+        executeAutosave();
+      };
+
+      if (typeof window.requestIdleCallback === 'function') {
+        idleCallbackIdRef.current = window.requestIdleCallback(handleIdleRun, { timeout: 2000 });
+      } else {
+        idleCallbackIdRef.current = window.setTimeout(handleIdleRun, 50);
+      }
+    }, QUIET_WINDOW_MS);
+  }, [executeAutosave]);
+
+  const saveDocumentDebounced = useCallback(
+    (documentToSave: NotebookDocument) => {
+      pendingDocumentRef.current = documentToSave;
+      lastInteractionTimeRef.current = performance.now();
+      scheduleAutosave();
+    },
+    [scheduleAutosave]
+  );
+
+  // Global listeners to track pointer-down state and flush on lifecycle events
+  useEffect(() => {
+    const handlePointerDown = () => {
+      isPointerDownRef.current = true;
+      lastInteractionTimeRef.current = performance.now();
+    };
+
+    const handlePointerUp = () => {
+      isPointerDownRef.current = false;
+      lastInteractionTimeRef.current = performance.now();
+      if (pendingDocumentRef.current) {
+        scheduleAutosave();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingSave();
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, { capture: true });
+    window.addEventListener('pointerup', handlePointerUp, { capture: true });
+    window.addEventListener('pointercancel', handlePointerUp, { capture: true });
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', flushPendingSave);
+    window.addEventListener('beforeunload', flushPendingSave);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, { capture: true });
+      window.removeEventListener('pointerup', handlePointerUp, { capture: true });
+      window.removeEventListener('pointercancel', handlePointerUp, { capture: true });
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', flushPendingSave);
+      window.removeEventListener('beforeunload', flushPendingSave);
+    };
+  }, [flushPendingSave, scheduleAutosave]);
 
 
 
