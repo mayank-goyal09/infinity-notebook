@@ -667,35 +667,40 @@ export default function App() {
 
 
   // Debounced Autosave
-
   const autosaveTimerRef = useRef<number | null>(null);
-
   const saveDocumentDebounced = useCallback((documentToSave: NotebookDocument) => {
-
     if (autosaveTimerRef.current !== null) {
-
       clearTimeout(autosaveTimerRef.current);
-
     }
 
-
-
     autosaveTimerRef.current = window.setTimeout(async () => {
-
+      performance.mark('autosave-start');
+      const syncStatus = syncEngineRef.current.getStatus();
       try {
-
+        performance.mark('storage-save-start');
         await storageServiceRef.current.saveDocument(documentToSave);
+        performance.mark('storage-save-end');
+        performance.measure('autosave-storage-save', 'storage-save-start', 'storage-save-end');
 
-        syncEngineRef.current.syncDocument(documentToSave);
+        performance.mark('sync-doc-start');
+        await syncEngineRef.current.syncDocument(documentToSave);
+        performance.mark('sync-doc-end');
+        performance.measure('autosave-sync-doc', 'sync-doc-start', 'sync-doc-end');
 
+        performance.mark('autosave-end');
+        performance.measure('autosave-total', 'autosave-start', 'autosave-end');
+
+        const storageDuration = performance.getEntriesByName('autosave-storage-save').pop()?.duration.toFixed(2);
+        const syncDuration = performance.getEntriesByName('autosave-sync-doc').pop()?.duration.toFixed(2);
+        const totalDuration = performance.getEntriesByName('autosave-total').pop()?.duration.toFixed(2);
+
+        console.log(
+          `[Autosave Profile] Total: ${totalDuration}ms | storage.saveDocument: ${storageDuration}ms | syncEngine.syncDocument: ${syncDuration}ms | Provider: ${syncStatus.provider} (${syncStatus.state}) | Objects: ${documentToSave.objects.length}`
+        );
       } catch (err) {
-
         console.error('Autosave error:', err);
-
       }
-
     }, 600);
-
   }, []);
 
 
