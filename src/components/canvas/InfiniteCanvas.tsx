@@ -487,6 +487,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   // Inline Text Editor
   const [editingTextObj, setEditingTextObj] = useState<{
     id: string;
+    pageId?: string | null;
     text: string;
     x: number;
     y: number;
@@ -857,15 +858,61 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     renderScene();
   }, [doc, theme, renderScene]);
 
-  // Clean up any old static 'Type here...' placeholder objects from previous sessions
+  // Clean up old placeholder text & automatically wrap any existing text objects exceeding page boundaries
   useEffect(() => {
-    const hasDummyText = doc.objects.some(
-      (o) => o.type === 'text' && (o as TextObject).text === 'Type here...'
+    let modified = false;
+    let cleaned = doc.objects.filter(
+      (o) => !(o.type === 'text' && (o as TextObject).text === 'Type here...')
     );
-    if (hasDummyText) {
-      const cleaned = doc.objects.filter(
-        (o) => !(o.type === 'text' && (o as TextObject).text === 'Type here...')
-      );
+    if (cleaned.length !== doc.objects.length) {
+      modified = true;
+    }
+
+    cleaned = cleaned.map((o) => {
+      if (o.type === 'text') {
+        const txt = o as TextObject;
+        const page =
+          doc.pages.find((p) => p.id === txt.pageId) ||
+          doc.pages.find(
+            (p) =>
+              txt.x >= p.x &&
+              txt.x <= p.x + p.width &&
+              txt.y >= p.y &&
+              txt.y <= p.y + p.height
+          );
+        if (page) {
+          const rightMargin = 28;
+          const maxAllowed = Math.max(160, (page.x + page.width - rightMargin) - txt.x);
+          if (txt.width > maxAllowed + 10) {
+            modified = true;
+            const lines = wrapTextLines(
+              txt.text,
+              maxAllowed - 12,
+              txt.fontSize,
+              txt.fontFamily,
+              txt.bold ?? false,
+              txt.italic ?? false
+            );
+            const dims = measureTextBounds(
+              lines.join('\n'),
+              txt.fontSize,
+              txt.fontFamily,
+              txt.bold ?? false,
+              txt.italic ?? false
+            );
+            return {
+              ...txt,
+              width: Math.min(maxAllowed, Math.max(160, dims.width)),
+              height: dims.height,
+              updatedAt: Date.now(),
+            };
+          }
+        }
+      }
+      return o;
+    });
+
+    if (modified) {
       onUpdateDocument({ ...doc, objects: cleaned }, false);
     }
   }, []);
@@ -2032,6 +2079,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       });
       setEditingTextObj({
         id: newText.id,
+        pageId: newText.pageId,
         text: '',
         x: newText.x,
         y: newText.y,
@@ -2929,7 +2977,30 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       return;
     }
 
-    const activePage = doc.pages.find((p) => p.id === doc.activePageId) || doc.pages[0];
+    const targetPage =
+      doc.pages.find((p) => p.id === editingTextObj.pageId) ||
+      doc.pages.find(
+        (p) =>
+          editingTextObj.x >= p.x &&
+          editingTextObj.x <= p.x + p.width &&
+          editingTextObj.y >= p.y &&
+          editingTextObj.y <= p.y + p.height
+      ) ||
+      doc.pages.find((p) => p.id === doc.activePageId) ||
+      doc.pages[0];
+
+    const containerW = containerRef.current?.clientWidth || 800;
+    let maxAllowedWidth = 650;
+    if (targetPage && editingTextObj.x >= targetPage.x && editingTextObj.x <= targetPage.x + targetPage.width) {
+      const rightMargin = 28;
+      const availableOnPage = (targetPage.x + targetPage.width - rightMargin) - editingTextObj.x;
+      maxAllowedWidth = Math.max(160, Math.min(availableOnPage, 650));
+    } else {
+      const viewportRightDoc = cameraEngineRef.current.screenToDoc(containerW - 32, 0).x;
+      const availableInViewport = viewportRightDoc - editingTextObj.x;
+      maxAllowedWidth = Math.max(200, Math.min(availableInViewport, 650));
+    }
+
     const dims = measureTextBounds(
       textValue,
       editingTextObj.fontSize,
@@ -2937,13 +3008,34 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       editingTextObj.bold ?? false,
       editingTextObj.italic ?? false
     );
-    const calculatedWidth = dims.width;
-    const calculatedHeight = dims.height;
+    let calculatedWidth = dims.width;
+    let calculatedHeight = dims.height;
+
+    // Automatically wrap text if it exceeds available page or viewport boundaries
+    if (calculatedWidth > maxAllowedWidth) {
+      const wrappedLines = wrapTextLines(
+        textValue,
+        maxAllowedWidth - 12,
+        editingTextObj.fontSize,
+        editingTextObj.fontFamily,
+        editingTextObj.bold ?? false,
+        editingTextObj.italic ?? false
+      );
+      const wrappedDims = measureTextBounds(
+        wrappedLines.join('\n'),
+        editingTextObj.fontSize,
+        editingTextObj.fontFamily,
+        editingTextObj.bold ?? false,
+        editingTextObj.italic ?? false
+      );
+      calculatedWidth = Math.min(maxAllowedWidth, Math.max(160, wrappedDims.width));
+      calculatedHeight = wrappedDims.height;
+    }
 
     if (editingTextObj.isNew) {
       const newText: TextObject = {
         id: editingTextObj.id,
-        pageId: activePage ? activePage.id : null,
+        pageId: targetPage ? targetPage.id : null,
         type: 'text',
         layerId: 'layer-text',
         x: editingTextObj.x,
@@ -3055,6 +3147,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     if (hitText) {
       setEditingTextObj({
         id: hitText.id,
+        pageId: hitText.pageId,
         text: hitText.text,
         x: hitText.x,
         y: hitText.y,
@@ -3159,8 +3252,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       const fontColor = textConfig?.color || defaultColor;
       const initialFontSize = textConfig?.fontSize || 20;
 
+      const targetPage = doc.pages.find((p) => p.id === doc.activePageId) || doc.pages[0];
       setEditingTextObj({
         id: newId,
+        pageId: targetPage ? targetPage.id : null,
         text: '',
         x: docPt.x,
         y: docPt.y,
@@ -3683,8 +3778,69 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             tempImg.src = dataUrl;
           };
           reader.readAsDataURL(file);
-          break;
+          return;
         }
+      }
+
+      // Handle plain text paste directly onto canvas
+      const plainText = e.clipboardData?.getData('text/plain');
+      if (plainText && plainText.trim()) {
+        e.preventDefault();
+        const container = containerRef.current;
+        const screenCenterX = (container?.clientWidth || 800) / 2;
+        const screenCenterY = (container?.clientHeight || 600) / 2;
+        const docCenter = cameraEngineRef.current.screenToDoc(screenCenterX, screenCenterY);
+        const activePage = doc.pages.find((p) => p.id === doc.activePageId) || doc.pages[0];
+
+        const defaultColor = theme === 'dark' ? '#f4f4f5' : '#1e1e1e';
+        const fontSize = textConfig?.fontSize || 20;
+        const fontFamily = textConfig?.fontFamily || 'Inter, sans-serif';
+
+        let startX = Math.round(docCenter.x - 160);
+        let startY = Math.round(docCenter.y - 20);
+
+        let maxAllowedW = 600;
+        if (activePage) {
+          const margin = 32;
+          startX = Math.max(activePage.x + margin, Math.min(startX, activePage.x + activePage.width - 200));
+          maxAllowedW = Math.max(200, (activePage.x + activePage.width - margin) - startX);
+        }
+
+        const wrappedLines = wrapTextLines(plainText, maxAllowedW - 12, fontSize, fontFamily, false, false);
+        const dims = measureTextBounds(wrappedLines.join('\n'), fontSize, fontFamily, false, false);
+
+        const newText: TextObject = {
+          id: 'text-' + Math.random().toString(36).substring(2, 9),
+          pageId: activePage ? activePage.id : null,
+          type: 'text',
+          layerId: 'layer-text',
+          x: startX,
+          y: startY,
+          width: Math.min(maxAllowedW, Math.max(160, dims.width)),
+          height: dims.height,
+          text: plainText,
+          fontSize,
+          fontFamily,
+          color: textConfig?.color || defaultColor,
+          align: textConfig?.align || 'left',
+          bold: textConfig?.bold ?? false,
+          italic: textConfig?.italic ?? false,
+          underline: textConfig?.underline ?? false,
+          opacity: textConfig?.opacity ?? 1,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          deviceId: 'local',
+        };
+
+        onUpdateDocument(
+          {
+            ...doc,
+            objects: [...doc.objects, newText],
+          },
+          true
+        );
+        onSelectIds?.([newText.id]);
+        return;
       }
     };
 
@@ -3840,85 +3996,115 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       )}
 
       {/* Layer 4: Excalidraw-Style Inline WYSIWYG Text Editor */}
-      {editingTextObj && (
-        <div
-          style={{
-            position: 'absolute',
-            left: editingTextObj.x * cameraState.zoom + cameraState.x,
-            top: editingTextObj.y * cameraState.zoom + cameraState.y,
-            zIndex: 60,
-            pointerEvents: activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current ? 'none' : 'auto',
-          }}
-          onClick={(e) => {
-            if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
-            e.stopPropagation();
-          }}
-          onPointerDown={(e) => {
-            if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
-            e.stopPropagation();
-          }}
-        >
-          <textarea
-            ref={(el) => {
-              activeTextareaRef.current = el;
-              if (el) {
+      {editingTextObj && (() => {
+        const targetPage =
+          doc.pages.find((p) => p.id === editingTextObj.pageId) ||
+          doc.pages.find(
+            (p) =>
+              editingTextObj.x >= p.x &&
+              editingTextObj.x <= p.x + p.width &&
+              editingTextObj.y >= p.y &&
+              editingTextObj.y <= p.y + p.height
+          ) ||
+          doc.pages.find((p) => p.id === doc.activePageId) ||
+          doc.pages[0];
+
+        const containerW = containerRef.current?.clientWidth || 800;
+        let maxDocW = 650;
+        if (targetPage && editingTextObj.x >= targetPage.x && editingTextObj.x <= targetPage.x + targetPage.width) {
+          const rightMargin = 28;
+          const availableOnPage = (targetPage.x + targetPage.width - rightMargin) - editingTextObj.x;
+          maxDocW = Math.max(160, Math.min(availableOnPage, 650));
+        } else {
+          const viewportRightDoc = cameraEngineRef.current.screenToDoc(containerW - 32, 0).x;
+          const availableInViewport = viewportRightDoc - editingTextObj.x;
+          maxDocW = Math.max(200, Math.min(availableInViewport, 650));
+        }
+        const maxScreenW = maxDocW * cameraState.zoom;
+
+        return (
+          <div
+            style={{
+              position: 'absolute',
+              left: editingTextObj.x * cameraState.zoom + cameraState.x,
+              top: editingTextObj.y * cameraState.zoom + cameraState.y,
+              zIndex: 60,
+              pointerEvents: activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current ? 'none' : 'auto',
+            }}
+            onClick={(e) => {
+              if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+              e.stopPropagation();
+            }}
+            onPointerDown={(e) => {
+              if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+              e.stopPropagation();
+            }}
+          >
+            <textarea
+              ref={(el) => {
+                activeTextareaRef.current = el;
+                if (el) {
+                  el.style.width = 'auto';
+                  const targetW = Math.min(maxScreenW, Math.max(80, el.scrollWidth + 12));
+                  el.style.width = `${targetW}px`;
+                  el.style.height = 'auto';
+                  el.style.height = `${Math.max(28, el.scrollHeight)}px`;
+                }
+              }}
+              autoFocus
+              defaultValue={editingTextObj.text}
+              placeholder=""
+              style={{
+                fontSize: `${editingTextObj.fontSize * cameraState.zoom}px`,
+                lineHeight: 1.35,
+                fontFamily: editingTextObj.fontFamily,
+                fontWeight: editingTextObj.bold ? '600' : '400',
+                fontStyle: editingTextObj.italic ? 'italic' : 'normal',
+                textDecoration: editingTextObj.underline ? 'underline' : 'none',
+                color: editingTextObj.color,
+                caretColor: editingTextObj.color,
+                textAlign: editingTextObj.align || 'left',
+                opacity: editingTextObj.opacity ?? 1,
+                background: 'transparent',
+                border: '1px solid rgba(59, 130, 246, 0.5)',
+                borderRadius: '3px',
+                outline: 'none',
+                padding: '0px 4px',
+                margin: 0,
+                resize: 'none',
+                overflow: 'hidden',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                maxWidth: `${maxScreenW}px`,
+                boxSizing: 'border-box',
+                display: 'block',
+              }}
+              onInput={(e) => {
+                const el = e.currentTarget;
+                el.style.width = 'auto';
+                const targetW = Math.min(maxScreenW, Math.max(80, el.scrollWidth + 12));
+                el.style.width = `${targetW}px`;
                 el.style.height = 'auto';
                 el.style.height = `${Math.max(28, el.scrollHeight)}px`;
-                el.style.width = 'auto';
-                el.style.width = `${Math.max(80, el.scrollWidth + 20)}px`;
-              }
-            }}
-            autoFocus
-            defaultValue={editingTextObj.text}
-            placeholder=""
-            style={{
-              fontSize: `${editingTextObj.fontSize * cameraState.zoom}px`,
-              lineHeight: 1.35,
-              fontFamily: editingTextObj.fontFamily,
-              fontWeight: editingTextObj.bold ? '600' : '400',
-              fontStyle: editingTextObj.italic ? 'italic' : 'normal',
-              textDecoration: editingTextObj.underline ? 'underline' : 'none',
-              color: editingTextObj.color,
-              caretColor: editingTextObj.color,
-              textAlign: editingTextObj.align || 'left',
-              opacity: editingTextObj.opacity ?? 1,
-              background: 'transparent',
-              border: '1px solid rgba(59, 130, 246, 0.5)',
-              borderRadius: '3px',
-              outline: 'none',
-              padding: '0px 4px',
-              margin: 0,
-              resize: 'none',
-              overflow: 'hidden',
-              whiteSpace: 'pre',
-              wordBreak: 'normal',
-              boxSizing: 'border-box',
-              display: 'block',
-            }}
-            onInput={(e) => {
-              const el = e.currentTarget;
-              el.style.height = 'auto';
-              el.style.height = `${Math.max(28, el.scrollHeight)}px`;
-              el.style.width = 'auto';
-              el.style.width = `${Math.max(80, el.scrollWidth + 20)}px`;
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
-                e.preventDefault();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+                  e.preventDefault();
+                  handleCommitText(e.currentTarget.value);
+                }
+              }}
+              onBlur={(e) => {
+                // Ignore blur if it occurs immediately after creation (caused by pointerup/click completing on canvas)
+                if (performance.now() - textCreationTimeRef.current < 250) {
+                  e.currentTarget.focus();
+                  return;
+                }
                 handleCommitText(e.currentTarget.value);
-              }
-            }}
-            onBlur={(e) => {
-              // Ignore blur if it occurs immediately after creation (caused by pointerup/click completing on canvas)
-              if (performance.now() - textCreationTimeRef.current < 250) {
-                e.currentTarget.focus();
-                return;
-              }
-              handleCommitText(e.currentTarget.value);
-            }}
-          />
-        </div>
-      )}
+              }}
+            />
+          </div>
+        );
+      })()}
 
       {/* Quick Action Pill: Convert Selected Handwriting to Text */}
       {selectedStrokes.length > 0 &&
