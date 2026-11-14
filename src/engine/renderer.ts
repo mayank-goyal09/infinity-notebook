@@ -934,8 +934,8 @@ export class CanvasRenderer {
     const outlinePoints = getStroke(inputPoints, {
       size: strokeSize,
       thinning: isHighlighter ? 0 : 0.55,
-      smoothing: 0.55,
-      streamline: 0.4,
+      smoothing: 0.35,
+      streamline: 0.12,
       simulatePressure: !hasRealPressure && !isHighlighter,
       easing: (t: number) => Math.sin((t * Math.PI) / 2),
       start: {
