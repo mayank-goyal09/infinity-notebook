@@ -32,6 +32,28 @@ export class CanvasRenderer {
   private patternCache = new Map<string, CanvasPattern>();
   private textLayoutCache = new Map<string, string[]>();
   private static readonly TEXT_CACHE_MAX = 512;
+  private strokePathCache = new Map<string, Path2D>();
+  private static readonly STROKE_PATH_CACHE_MAX = 2048;
+
+  private setStrokePathCache(key: string, path: Path2D) {
+    if (this.strokePathCache.size >= CanvasRenderer.STROKE_PATH_CACHE_MAX) {
+      const first = this.strokePathCache.keys().next().value;
+      if (first !== undefined) this.strokePathCache.delete(first);
+    }
+    this.strokePathCache.set(key, path);
+  }
+
+  public clearStrokeCache(idPrefix?: string) {
+    if (idPrefix) {
+      for (const key of this.strokePathCache.keys()) {
+        if (key.startsWith(idPrefix)) {
+          this.strokePathCache.delete(key);
+        }
+      }
+    } else {
+      this.strokePathCache.clear();
+    }
+  }
 
   /**
    * Cached text wrapping – returns wrapped lines from cache when the text
@@ -203,6 +225,7 @@ export class CanvasRenderer {
     let renderedCount = 0;
 
     for (const obj of objects) {
+      if (obj.opacity !== undefined && obj.opacity <= 0) continue;
       if (this.intersects(visibleRect, obj)) {
         try {
           this.renderObject(ctx, obj, camera.zoom, theme);
@@ -857,7 +880,11 @@ export class CanvasRenderer {
 
     // Excalidraw-grade freehand ribbon rendering via perfect-freehand (Method A: filled polygon only, 0 chord lines)
     // Used for all standard pens, brush, fountain, marker, and highlighter (ONE filled path, no overlap darkening)
-    this.renderVariableWidthStroke(ctx, pts, size, penType, isCommitted);
+    const cacheKey = isCommitted && stroke.id
+      ? `${stroke.id}_${stroke.updatedAt || stroke.createdAt || 0}_${size}_${penType}_${pts.length}`
+      : undefined;
+
+    this.renderVariableWidthStroke(ctx, pts, size, penType, isCommitted, cacheKey);
     ctx.restore();
   }
 
@@ -873,9 +900,18 @@ export class CanvasRenderer {
     points: StrokePoint[],
     baseSize: number,
     penType?: string,
-    isCommitted = true
+    isCommitted = true,
+    cacheKey?: string
   ) {
     if (points.length < 2) return;
+
+    if (cacheKey) {
+      const cached = this.strokePathCache.get(cacheKey);
+      if (cached) {
+        ctx.fill(cached);
+        return;
+      }
+    }
 
     const isHighlighter = penType === 'highlighter';
 
@@ -915,31 +951,37 @@ export class CanvasRenderer {
 
     if (outlinePoints.length < 3) {
       if (outlinePoints.length === 2) {
-        ctx.beginPath();
-        ctx.arc(outlinePoints[0][0], outlinePoints[0][1], strokeSize / 4, 0, Math.PI * 2);
-        ctx.fill();
+        const path = new Path2D();
+        path.arc(outlinePoints[0][0], outlinePoints[0][1], strokeSize / 4, 0, Math.PI * 2);
+        if (cacheKey) {
+          this.setStrokePathCache(cacheKey, path);
+        }
+        ctx.fill(path);
       }
       return;
     }
 
     // Convert outline points to smooth midpoint quadratic curves (Excalidraw standard)
-    ctx.beginPath();
+    const path = new Path2D();
     const len = outlinePoints.length;
     const p0 = outlinePoints[0];
     const p1 = outlinePoints[1];
-    ctx.moveTo((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+    path.moveTo((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
 
     for (let i = 1; i < len; i++) {
       const cur = outlinePoints[i];
       const next = outlinePoints[(i + 1) % len];
-      ctx.quadraticCurveTo(cur[0], cur[1], (cur[0] + next[0]) / 2, (cur[1] + next[1]) / 2);
+      path.quadraticCurveTo(cur[0], cur[1], (cur[0] + next[0]) / 2, (cur[1] + next[1]) / 2);
     }
 
     // Bridge the final segment back to start midpoint smoothly
-    ctx.quadraticCurveTo(outlinePoints[0][0], outlinePoints[0][1], (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+    path.quadraticCurveTo(outlinePoints[0][0], outlinePoints[0][1], (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
 
-    ctx.closePath();
-    ctx.fill(); // Never stroke(), only fill
+    path.closePath();
+    if (cacheKey) {
+      this.setStrokePathCache(cacheKey, path);
+    }
+    ctx.fill(path); // Never stroke(), only fill
   }
 
   private renderCalligraphyStroke(
@@ -1488,7 +1530,8 @@ export class CanvasRenderer {
           ...liveStrokeConfig,
           points: livePoints,
         },
-        camera.zoom
+        camera.zoom,
+        false
       );
     }
 
