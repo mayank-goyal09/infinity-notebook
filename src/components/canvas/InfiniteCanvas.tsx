@@ -546,6 +546,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     dateLabel?: string;
     isNew?: boolean;
   } | null>(null);
+  const editingStickyObjRef = useRef(editingStickyObj);
+  editingStickyObjRef.current = editingStickyObj;
 
   // Track if eraser made modifications during current drag
   const eraserModifiedRef = useRef(false);
@@ -3183,17 +3185,23 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   const handleCommitStickyText = (textValue: string) => {
     if (!editingStickyObj) return;
 
+    const stickyFont =
+      editingStickyObj.fontFamily ||
+      stickyConfig?.fontFamily ||
+      "'Patrick Hand', 'Virgil', -apple-system, sans-serif";
+    const stickyFontSize = editingStickyObj.fontSize || 20;
+
     // Compute required height based on wrapped lines
     const maxContentWidth = Math.max(30, editingStickyObj.width - 32);
     const lines = wrapTextLines(
       textValue || '',
       maxContentWidth,
-      editingStickyObj.fontSize || 20,
-      editingStickyObj.fontFamily || 'Caveat, cursive'
+      stickyFontSize,
+      stickyFont
     );
     const requiredHeight = Math.max(
       editingStickyObj.height,
-      Math.ceil(lines.length * (editingStickyObj.fontSize || 20) * 1.35 + 48)
+      Math.ceil(lines.length * stickyFontSize * 1.35 + 48)
     );
 
     const updated = doc.objects.map((o) =>
@@ -3202,11 +3210,19 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             ...o,
             text: textValue,
             height: requiredHeight,
+            fontFamily: stickyFont,
             updatedAt: Date.now(),
           }
         : o
     ) as CanvasObject[];
-    onUpdateDocument({ ...doc, objects: updated }, true);
+
+    // Synchronous ref update and immediate scene redraw to eliminate any commit flicker
+    editingStickyObjRef.current = null;
+    const updatedDoc = { ...doc, objects: updated };
+    docRef.current = updatedDoc;
+    clearTextMeasurementCache();
+    renderScene();
+    onUpdateDocument(updatedDoc, true);
     setEditingStickyObj(null);
   };
 
@@ -4348,94 +4364,122 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         )}
 
       {/* Layer 5: Interactive Sticky Note Inline Editor (Centered, Styled, Excalidraw Image 5) */}
-      {editingStickyObj && (
-        <div
-          style={{
-            position: 'absolute',
-            left: editingStickyObj.x * cameraState.zoom + cameraState.x,
-            top: editingStickyObj.y * cameraState.zoom + cameraState.y,
-            width: editingStickyObj.width * cameraState.zoom,
-            height: editingStickyObj.height * cameraState.zoom,
-            backgroundColor: editingStickyObj.color,
-            borderRadius: 14 * cameraState.zoom,
-            padding: `${16 * cameraState.zoom}px`,
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
-            zIndex: 60,
-            pointerEvents: activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current ? 'none' : 'auto',
-            boxSizing: 'border-box',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent:
-              editingStickyObj.verticalAlign === 'top'
-                ? 'flex-start'
-                : editingStickyObj.verticalAlign === 'bottom'
-                ? 'flex-end'
-                : 'center',
-          }}
-          onClick={(e) => {
-            if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
-            e.stopPropagation();
-          }}
-          onPointerDown={(e) => {
-            if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
-            e.stopPropagation();
-          }}
-        >
-          <textarea
-            ref={(el) => {
-              activeStickyTextareaRef.current = el;
-            }}
-            autoFocus
-            defaultValue={editingStickyObj.text}
-            placeholder=""
-            style={{
-              width: '100%',
-              maxHeight: `${(editingStickyObj.height - 36) * cameraState.zoom}px`,
-              fontSize: `${editingStickyObj.fontSize * cameraState.zoom}px`,
-              lineHeight: 1.35,
-              fontFamily: editingStickyObj.fontFamily || 'Caveat, cursive',
-              color: editingStickyObj.textColor || '#1e1e1e',
-              caretColor: editingStickyObj.textColor || '#1e1e1e',
-              textAlign: editingStickyObj.textAlign || 'center',
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              resize: 'none',
-              padding: 0,
-              margin: 0,
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
-                e.preventDefault();
-                handleCommitStickyText(e.currentTarget.value);
-              }
-            }}
-            onBlur={(e) => {
-              handleCommitStickyText(e.currentTarget.value);
-            }}
-          />
+      {editingStickyObj && (() => {
+        const zoom = cameraState.zoom;
+        const noteFontFamily =
+          editingStickyObj.fontFamily ||
+          stickyConfig?.fontFamily ||
+          "'Patrick Hand', 'Virgil', -apple-system, sans-serif";
+        const noteFontSize = (editingStickyObj.fontSize || 20) * zoom;
+        const noteColor = editingStickyObj.color || '#fef08a';
+        const noteTextColor = editingStickyObj.textColor || '#1e1e1e';
+        const noteTextAlign = editingStickyObj.textAlign || 'center';
+        const noteVerticalAlign = editingStickyObj.verticalAlign || 'middle';
 
-          {/* Date stamp watermark in bottom-right corner */}
-          <span
+        const adjustStickyTextarea = (el: HTMLTextAreaElement | null) => {
+          if (!el) return;
+          el.style.height = 'auto';
+          el.style.height = `${el.scrollHeight}px`;
+        };
+
+        return (
+          <div
             style={{
               position: 'absolute',
-              right: `${14 * cameraState.zoom}px`,
-              bottom: `${10 * cameraState.zoom}px`,
-              fontSize: `${11 * cameraState.zoom}px`,
-              color: 'rgba(0, 0, 0, 0.45)',
-              fontFamily: 'Inter, -apple-system, sans-serif',
-              fontWeight: 500,
-              pointerEvents: 'none',
-              userSelect: 'none',
+              left: editingStickyObj.x * zoom + cameraState.x,
+              top: editingStickyObj.y * zoom + cameraState.y,
+              width: editingStickyObj.width * zoom,
+              minHeight: editingStickyObj.height * zoom,
+              height: 'auto',
+              backgroundColor: noteColor,
+              borderRadius: 14 * zoom,
+              paddingTop: `${16 * zoom}px`,
+              paddingBottom: `${24 * zoom}px`,
+              paddingLeft: `${16 * zoom}px`,
+              paddingRight: `${16 * zoom}px`,
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+              zIndex: 60,
+              pointerEvents: activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current ? 'none' : 'auto',
+              boxSizing: 'border-box',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent:
+                noteVerticalAlign === 'top'
+                  ? 'flex-start'
+                  : noteVerticalAlign === 'bottom'
+                  ? 'flex-end'
+                  : 'center',
+              alignItems: 'center',
+            }}
+            onClick={(e) => {
+              if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+              e.stopPropagation();
+            }}
+            onPointerDown={(e) => {
+              if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+              e.stopPropagation();
             }}
           >
-            {editingStickyObj.dateLabel || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-          </span>
-        </div>
-      )}
+            <textarea
+              ref={(el) => {
+                activeStickyTextareaRef.current = el;
+                adjustStickyTextarea(el);
+              }}
+              autoFocus
+              defaultValue={editingStickyObj.text}
+              placeholder=""
+              rows={1}
+              style={{
+                width: '100%',
+                height: 'auto',
+                fontSize: `${noteFontSize}px`,
+                lineHeight: 1.35,
+                fontFamily: noteFontFamily,
+                color: noteTextColor,
+                caretColor: noteTextColor,
+                textAlign: noteTextAlign,
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                resize: 'none',
+                padding: 0,
+                margin: 0,
+                overflow: 'hidden',
+                scrollbarWidth: 'none',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+              onInput={(e) => adjustStickyTextarea(e.currentTarget)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+                  e.preventDefault();
+                  handleCommitStickyText(e.currentTarget.value);
+                }
+              }}
+              onBlur={(e) => {
+                handleCommitStickyText(e.currentTarget.value);
+              }}
+            />
+
+            {/* Date stamp watermark in bottom-right corner */}
+            <span
+              style={{
+                position: 'absolute',
+                right: `${14 * zoom}px`,
+                bottom: `${10 * zoom}px`,
+                fontSize: `${11 * zoom}px`,
+                color: 'rgba(0, 0, 0, 0.45)',
+                fontFamily: 'Inter, -apple-system, sans-serif',
+                fontWeight: 500,
+                pointerEvents: 'none',
+                userSelect: 'none',
+              }}
+            >
+              {editingStickyObj.dateLabel || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Off-screen Work Area Indicator / Quick Return Button */}
       {isContentOffscreen && doc.objects.length > 0 && (
