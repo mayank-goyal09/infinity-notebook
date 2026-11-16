@@ -58,7 +58,7 @@ import { CanvasRenderer } from './engine/renderer';
 
 import { createAccountingTable, recalculateTableAutoSums, ACCOUNTING_FORMAT_CATALOG } from './engine/accountingFormats';
 
-import { measureTextBounds } from './engine/textMeasurement';
+import { measureTextBounds, wrapTextLines } from './engine/textMeasurement';
 
 
 
@@ -282,7 +282,7 @@ export default function App() {
 
   const [textConfig, setTextConfig] = useState<TextConfig>({
 
-    fontFamily: 'Caveat, cursive',
+    fontFamily: "'Patrick Hand', 'Virgil', -apple-system, sans-serif",
 
     fontSize: 20,
 
@@ -308,7 +308,7 @@ export default function App() {
 
     textColor: '#1e1e1e',
 
-    fontFamily: 'Caveat, cursive',
+    fontFamily: "'Patrick Hand', 'Virgil', -apple-system, sans-serif",
 
     fontSize: 20,
 
@@ -1170,11 +1170,13 @@ export default function App() {
 
   // Zoom and Canvas Helpers
 
-  const handleZoomIn = () => window.dispatchEvent(new CustomEvent('canvas:zoom-in'));
+  const handleZoomIn = (options?: { scrub?: boolean; delta?: number }) => window.dispatchEvent(new CustomEvent('canvas:zoom-in', { detail: options }));
 
-  const handleZoomOut = () => window.dispatchEvent(new CustomEvent('canvas:zoom-out'));
+  const handleZoomOut = (options?: { scrub?: boolean; delta?: number }) => window.dispatchEvent(new CustomEvent('canvas:zoom-out', { detail: options }));
 
   const handleResetZoom = () => window.dispatchEvent(new CustomEvent('canvas:zoom-reset'));
+
+  const handleZoomScrub = (delta: number) => window.dispatchEvent(new CustomEvent('canvas:zoom-scrub', { detail: { deltaX: delta } }));
 
 
 
@@ -2474,7 +2476,20 @@ export default function App() {
 
           const nextItalic = (updates as Partial<TextObject>).italic ?? t.italic ?? false;
 
+          const targetWidth = (updates as Partial<TextObject>).width ?? t.width;
           const dims = measureTextBounds(nextText, nextFontSize, nextFontFamily, nextBold, nextItalic);
+
+          let finalW = dims.width;
+          let finalH = dims.height;
+
+          // If text object has an established targetWidth, preserve targetWidth and wrap lines cleanly
+          if (targetWidth) {
+            finalW = targetWidth;
+            const maxContentW = Math.max(30, finalW - 12);
+            const lines = wrapTextLines(nextText, maxContentW, nextFontSize, nextFontFamily, nextBold, nextItalic);
+            const lineHeight = nextFontSize * 1.35;
+            finalH = Math.max(Math.round(nextFontSize * 1.5), Math.ceil(lines.length * lineHeight + 10));
+          }
 
           return {
 
@@ -2482,9 +2497,9 @@ export default function App() {
 
             ...updates,
 
-            width: dims.width,
+            width: finalW,
 
-            height: dims.height,
+            height: finalH,
 
             updatedAt: Date.now(),
 
@@ -2917,6 +2932,8 @@ export default function App() {
         onZoomOut={handleZoomOut}
 
         onResetZoom={handleResetZoom}
+
+        onZoomScrub={handleZoomScrub}
 
         onZoomFit={() => window.dispatchEvent(new CustomEvent('canvas:zoom-fit'))}
 
