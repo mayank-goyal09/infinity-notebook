@@ -6,6 +6,7 @@ interface ExcalidrawBottomBarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onResetZoom: () => void;
+  onZoomScrub?: (delta: number) => void;
   onZoomFit?: () => void;
   onNavigateToCenter?: () => void;
   canUndo: boolean;
@@ -19,6 +20,7 @@ export const ExcalidrawBottomBar: React.FC<ExcalidrawBottomBarProps> = ({
   onZoomIn,
   onZoomOut,
   onResetZoom,
+  onZoomScrub,
   onZoomFit,
   onNavigateToCenter,
   canUndo,
@@ -29,6 +31,7 @@ export const ExcalidrawBottomBar: React.FC<ExcalidrawBottomBarProps> = ({
   const repeatTimerRef = React.useRef<number | null>(null);
   const repeatIntervalRef = React.useRef<number | null>(null);
 
+  // Original repeat feature: immediately fires action and repeats if held
   const startRepeating = (action: () => void) => {
     action();
     stopRepeating();
@@ -50,32 +53,124 @@ export const ExcalidrawBottomBar: React.FC<ExcalidrawBottomBarProps> = ({
     }
   };
 
+  // Scrubby Zoom: drag left/right to zoom in & out smoothly
+  const scrubRef = React.useRef<{
+    isDown: boolean;
+    isScrubbing: boolean;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+  }>({
+    isDown: false,
+    isScrubbing: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+  });
+
+  const startScrubbing = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    scrubRef.current = {
+      isDown: true,
+      isScrubbing: false,
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+    };
+  };
+
+  const handleScrubMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!scrubRef.current.isDown) return;
+    const dx = e.clientX - scrubRef.current.lastX;
+    const dy = e.clientY - scrubRef.current.lastY;
+    const totalDist = Math.hypot(e.clientX - scrubRef.current.startX, e.clientY - scrubRef.current.startY);
+
+    if (!scrubRef.current.isScrubbing && totalDist > 4) {
+      scrubRef.current.isScrubbing = true;
+      stopRepeating(); // Scrub takes over: stop stepped interval
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    if (scrubRef.current.isScrubbing) {
+      scrubRef.current.lastX = e.clientX;
+      scrubRef.current.lastY = e.clientY;
+      const delta = dx - dy * 0.5;
+      if (delta !== 0) {
+        if (onZoomScrub) {
+          onZoomScrub(delta);
+        } else {
+          window.dispatchEvent(new CustomEvent('canvas:zoom-scrub', { detail: { deltaX: delta } }));
+        }
+      }
+    }
+  };
+
+  const stopScrubbing = (e?: React.PointerEvent<HTMLButtonElement>) => {
+    if (e) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+    if (scrubRef.current.isScrubbing) {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    scrubRef.current.isDown = false;
+    scrubRef.current.isScrubbing = false;
+  };
+
   React.useEffect(() => {
-    return () => stopRepeating();
+    return () => {
+      stopRepeating();
+      stopScrubbing();
+    };
   }, []);
 
   return (
     <div className="fixed bottom-3 left-3 z-50 flex items-center gap-2 select-none pointer-events-auto">
-      {/* Pill 1: Zoom Controls */}
+      {/* Pill 1: Zoom Controls with Click, Hold-Repeat, and Scrubby Zoom */}
       <div className="bg-white/95 dark:bg-stone-900/95 backdrop-blur-md border border-stone-200/80 dark:border-stone-800 rounded-xl shadow-lg p-1 flex items-center gap-0.5 text-xs">
         {/* Zoom Out */}
         <button
-          onPointerDown={() => startRepeating(onZoomOut)}
-          onPointerUp={stopRepeating}
-          onPointerLeave={stopRepeating}
-          onPointerCancel={stopRepeating}
+          onPointerDown={(e) => {
+            startRepeating(onZoomOut);
+            startScrubbing(e);
+          }}
+          onPointerMove={handleScrubMove}
+          onPointerUp={(e) => {
+            stopRepeating();
+            stopScrubbing(e);
+          }}
+          onPointerLeave={() => {
+            stopRepeating();
+          }}
+          onPointerCancel={(e) => {
+            stopRepeating();
+            stopScrubbing(e);
+          }}
           className="p-1.5 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer active:scale-95"
-          title="Zoom out (Ctrl + -)"
+          title="Zoom out (Ctrl + -) • Drag to scrub zoom"
           aria-label="Zoom out"
         >
           <Minus className="w-3.5 h-3.5" />
         </button>
 
-        {/* Zoom Percent: Clicking resets to 100% */}
+        {/* Zoom Percent: Clicking resets to 100%, dragging scrubs zoom */}
         <button
           onClick={onResetZoom}
+          onPointerDown={startScrubbing}
+          onPointerMove={handleScrubMove}
+          onPointerUp={stopScrubbing}
+          onPointerCancel={stopScrubbing}
           className="px-2 py-1 rounded-lg text-stone-700 dark:text-stone-200 font-mono font-bold hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-blue-600 dark:hover:text-blue-400 transition-colors min-w-[52px] text-center cursor-pointer"
-          title="Reset zoom to 100% (Ctrl + 0)"
+          title="Reset zoom to 100% (Ctrl + 0) • Drag to scrub zoom"
           aria-label="Reset zoom to 100%"
         >
           {zoomPercent}%
@@ -83,12 +178,24 @@ export const ExcalidrawBottomBar: React.FC<ExcalidrawBottomBarProps> = ({
 
         {/* Zoom In */}
         <button
-          onPointerDown={() => startRepeating(onZoomIn)}
-          onPointerUp={stopRepeating}
-          onPointerLeave={stopRepeating}
-          onPointerCancel={stopRepeating}
+          onPointerDown={(e) => {
+            startRepeating(onZoomIn);
+            startScrubbing(e);
+          }}
+          onPointerMove={handleScrubMove}
+          onPointerUp={(e) => {
+            stopRepeating();
+            stopScrubbing(e);
+          }}
+          onPointerLeave={() => {
+            stopRepeating();
+          }}
+          onPointerCancel={(e) => {
+            stopRepeating();
+            stopScrubbing(e);
+          }}
           className="p-1.5 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer active:scale-95"
-          title="Zoom in (Ctrl + +)"
+          title="Zoom in (Ctrl + +) • Drag to scrub zoom"
           aria-label="Zoom in"
         >
           <Plus className="w-3.5 h-3.5" />
