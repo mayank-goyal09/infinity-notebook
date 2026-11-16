@@ -32,6 +32,83 @@ export const Minimap: React.FC<MinimapProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isCollapsed, setIsCollapsed] = React.useState(false);
 
+  // Scrubby Zoom for minimap zoom controls
+  const scrubRef = useRef<{
+    isDown: boolean;
+    isScrubbing: boolean;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+  }>({
+    isDown: false,
+    isScrubbing: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+  });
+
+  const startScrubbing = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    scrubRef.current = {
+      isDown: true,
+      isScrubbing: false,
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+    };
+  };
+
+  const handleScrubMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!scrubRef.current.isDown) return;
+    const dx = e.clientX - scrubRef.current.lastX;
+    const dy = e.clientY - scrubRef.current.lastY;
+    const totalDist = Math.hypot(e.clientX - scrubRef.current.startX, e.clientY - scrubRef.current.startY);
+
+    if (!scrubRef.current.isScrubbing && totalDist > 4) {
+      scrubRef.current.isScrubbing = true;
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    if (scrubRef.current.isScrubbing) {
+      scrubRef.current.lastX = e.clientX;
+      scrubRef.current.lastY = e.clientY;
+      const delta = dx - dy * 0.5;
+      if (delta !== 0) {
+        window.dispatchEvent(new CustomEvent('canvas:zoom-scrub', { detail: { deltaX: delta } }));
+      }
+    }
+  };
+
+  const stopScrubbing = (e?: React.PointerEvent<HTMLButtonElement>) => {
+    if (e) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+    if (scrubRef.current.isScrubbing) {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    scrubRef.current.isDown = false;
+    scrubRef.current.isScrubbing = false;
+  };
+
+  useEffect(() => {
+    return () => {
+      if (scrubRef.current.isScrubbing) {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || isCollapsed) return;
@@ -162,28 +239,40 @@ export const Minimap: React.FC<MinimapProps> = ({
         </div>
       )}
 
-      {/* Floating Zoom Control Bar */}
+      {/* Floating Zoom Control Bar with Scrubby Zoom */}
       <div className="flex items-center gap-1 bg-white/95 dark:bg-stone-900/95 backdrop-blur-xl px-2 py-1 rounded-xl shadow-lg border border-stone-200 dark:border-stone-800">
         <button
           onClick={onZoomOut}
-          className="p-1 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
-          title="Zoom Out (Ctrl -)"
+          onPointerDown={startScrubbing}
+          onPointerMove={handleScrubMove}
+          onPointerUp={stopScrubbing}
+          onPointerCancel={stopScrubbing}
+          className="p-1 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+          title="Zoom Out (Ctrl -) • Drag to scrub zoom"
         >
           <ZoomOut className="w-3.5 h-3.5" />
         </button>
 
         <button
           onClick={onZoomReset}
-          className="px-2 py-0.5 text-xs font-mono font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded transition-colors"
-          title="Reset to 100% (Ctrl+1)"
+          onPointerDown={startScrubbing}
+          onPointerMove={handleScrubMove}
+          onPointerUp={stopScrubbing}
+          onPointerCancel={stopScrubbing}
+          className="px-2 py-0.5 text-xs font-mono font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded transition-colors cursor-pointer"
+          title="Reset to 100% (Ctrl+1) • Drag to scrub zoom"
         >
           {zoomPercent}%
         </button>
 
         <button
           onClick={onZoomIn}
-          className="p-1 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
-          title="Zoom In (Ctrl +)"
+          onPointerDown={startScrubbing}
+          onPointerMove={handleScrubMove}
+          onPointerUp={stopScrubbing}
+          onPointerCancel={stopScrubbing}
+          className="p-1 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+          title="Zoom In (Ctrl +) • Drag to scrub zoom"
         >
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
