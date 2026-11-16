@@ -36,7 +36,7 @@ import { PAGE_SIZE_DIMENSIONS } from '../../engine/penDefaults';
 import { ACCOUNTING_FORMAT_CATALOG } from '../../engine/accountingFormats';
 import { AccountingTableOverlay } from './AccountingTableOverlay';
 import { TextConfig, StickyConfig } from '../toolbar/ExcalidrawPropertiesPanel';
-import { measureTextBounds, wrapTextLines } from '../../engine/textMeasurement';
+import { measureTextBounds, wrapTextLines, resolveThemeTextColor, clearTextMeasurementCache } from '../../engine/textMeasurement';
 import { getCanvasCursor } from '../../engine/canvasCursors';
 
 // Distance from point p to line segment (v -> w)
@@ -165,6 +165,16 @@ function isPointInObject(obj: CanvasObject, pt: { x: number; y: number }): boole
     return pt.x >= table.x && pt.x <= table.x + totalColsW && pt.y >= table.y - topMargin && pt.y <= table.y + totalH;
   }
 
+  if (obj.type === 'text') {
+    const t = obj as TextObject;
+    const boxW = t.width || 240;
+    const contentW = Math.max(30, boxW - 12);
+    const lines = wrapTextLines(t.text || '', contentW, t.fontSize, t.fontFamily || 'Inter, sans-serif', t.bold ?? false, t.italic ?? false);
+    const lineHeight = t.fontSize * 1.35;
+    const computedH = Math.max(t.height || 0, Math.ceil(lines.length * lineHeight + 10));
+    return pt.x >= obj.x && pt.x <= obj.x + boxW && pt.y >= obj.y && pt.y <= obj.y + computedH;
+  }
+
   const w = obj.width || 60;
   const h = obj.height || 30;
   return pt.x >= obj.x && pt.x <= obj.x + w && pt.y >= obj.y && pt.y <= obj.y + h;
@@ -184,6 +194,15 @@ function getEnclosingBounds(objs: CanvasObject[]): { x: number; y: number; width
       const baseRowH = table.rowHeight || 32;
       const rowsTotal = table.rows?.reduce((sum, r) => sum + (r.height || baseRowH), 0) || (3 * baseRowH);
       h = table.height || (hdrH + rowsTotal);
+    } else if (obj.type === 'text') {
+      const t = obj as TextObject;
+      const boxW = t.width || 240;
+      const contentW = Math.max(30, boxW - 12);
+      const lines = wrapTextLines(t.text || '', contentW, t.fontSize, t.fontFamily || 'Inter, sans-serif', t.bold ?? false, t.italic ?? false);
+      const lineHeight = t.fontSize * 1.35;
+      const computedH = Math.max(t.height || 0, Math.ceil(lines.length * lineHeight + 10));
+      w = boxW;
+      h = computedH;
     }
     const objMinX = Math.min(obj.x, obj.x + w);
     const objMaxX = Math.max(obj.x, obj.x + w);
@@ -456,7 +475,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       if (result && result.text.trim()) {
         const latestDoc = docRef.current;
         const activePage = latestDoc.pages.find((p) => p.id === latestDoc.activePageId) || latestDoc.pages[0];
-        const fontColor = target[0]?.color || (theme === 'dark' ? '#f4f4f5' : '#1e1e1e');
+        const strokeColor = target[0]?.color;
+        const fontColor = strokeColor
+          ? resolveThemeTextColor(strokeColor, theme)
+          : (theme === 'dark' ? '#f4f4f5' : '#1e1e1e');
         const newText = createTextFromHandwriting(
           result,
           activePage ? activePage.id : null,
@@ -491,6 +513,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     text: string;
     x: number;
     y: number;
+    width?: number;
+    height?: number;
     fontSize: number;
     fontFamily: string;
     color: string;
@@ -501,6 +525,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     opacity?: number;
     isNew?: boolean;
   } | null>(null);
+  const editingTextObjRef = useRef(editingTextObj);
+  editingTextObjRef.current = editingTextObj;
   const textCreationTimeRef = useRef<number>(0);
 
   // Inline Sticky Note Editor (Matching Excalidraw Image 5)
@@ -647,9 +673,11 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       pendingCommittedStrokeRef.current = null;
     }
     const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || currentDoc.objects;
-    const objectsWithoutEditing = editingTextObj
-      ? baseObjects.filter((o) => o.id !== editingTextObj.id)
-      : (editingStickyObj ? baseObjects.filter((o) => o.id !== editingStickyObj.id) : baseObjects);
+    const activeEditingTextId = editingTextObjRef.current?.id;
+    const activeEditingStickyId = editingStickyObj?.id;
+    const objectsWithoutEditing = activeEditingTextId
+      ? baseObjects.filter((o) => o.id !== activeEditingTextId)
+      : (activeEditingStickyId ? baseObjects.filter((o) => o.id !== activeEditingStickyId) : baseObjects);
     const objectsToRender =
       pending && !objectsWithoutEditing.some((o) => o.id === pending.id)
         ? [...objectsWithoutEditing, pending]
@@ -671,7 +699,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
     // Suppress selection bounding box over text when actively editing it
     const effectiveSelection =
-      editingTextObj && selection.selectedIds.includes(editingTextObj.id)
+      activeEditingTextId && selection.selectedIds.includes(activeEditingTextId)
         ? { ...selection, bounds: null }
         : selection;
 
@@ -858,61 +886,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     renderScene();
   }, [doc, theme, renderScene]);
 
-  // Clean up old placeholder text & automatically wrap any existing text objects exceeding page boundaries
+  // Clean up any stale placeholder text without mutating user text objects or squishing widths
   useEffect(() => {
-    let modified = false;
-    let cleaned = doc.objects.filter(
+    const cleaned = doc.objects.filter(
       (o) => !(o.type === 'text' && (o as TextObject).text === 'Type here...')
     );
     if (cleaned.length !== doc.objects.length) {
-      modified = true;
-    }
-
-    cleaned = cleaned.map((o) => {
-      if (o.type === 'text') {
-        const txt = o as TextObject;
-        const page =
-          doc.pages.find((p) => p.id === txt.pageId) ||
-          doc.pages.find(
-            (p) =>
-              txt.x >= p.x &&
-              txt.x <= p.x + p.width &&
-              txt.y >= p.y &&
-              txt.y <= p.y + p.height
-          );
-        if (page) {
-          const rightMargin = 28;
-          const maxAllowed = Math.max(160, (page.x + page.width - rightMargin) - txt.x);
-          if (txt.width > maxAllowed + 10) {
-            modified = true;
-            const lines = wrapTextLines(
-              txt.text,
-              maxAllowed - 12,
-              txt.fontSize,
-              txt.fontFamily,
-              txt.bold ?? false,
-              txt.italic ?? false
-            );
-            const dims = measureTextBounds(
-              lines.join('\n'),
-              txt.fontSize,
-              txt.fontFamily,
-              txt.bold ?? false,
-              txt.italic ?? false
-            );
-            return {
-              ...txt,
-              width: Math.min(maxAllowed, Math.max(160, dims.width)),
-              height: dims.height,
-              updatedAt: Date.now(),
-            };
-          }
-        }
-      }
-      return o;
-    });
-
-    if (modified) {
       onUpdateDocument({ ...doc, objects: cleaned }, false);
     }
   }, []);
@@ -2064,20 +2043,35 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     // 7. Text Tool: Click to place and immediately edit text
     if (activeTool === 'text') {
       const activePage = doc.pages.find((p) => p.id === doc.activePageId) || doc.pages[0];
-      const defaultColor = theme === 'dark' ? '#f4f4f5' : '#1e1e1e';
-      const fontColor = textConfig?.color || defaultColor;
-      const zoom = cameraEngineRef.current.getState().zoom;
-      const initialFontSize = Math.max(12, Math.round((textConfig?.fontSize || 20) / zoom));
+      const fontColor = resolveThemeTextColor(textConfig?.color, theme);
+      const initialFontSize = textConfig?.fontSize || 20;
+
+      const targetPage = doc.pages.find((p) => p.id === doc.activePageId) || doc.pages[0];
+      const containerW = containerRef.current?.clientWidth || 800;
+      let maxDocW = 600;
+      if (targetPage && docPt.x >= targetPage.x && docPt.x <= targetPage.x + targetPage.width) {
+        const rightMargin = 28;
+        const availableOnPage = (targetPage.x + targetPage.width - rightMargin) - docPt.x;
+        maxDocW = Math.max(260, Math.min(availableOnPage, 600));
+      } else {
+        const viewportRightDoc = cameraEngineRef.current.screenToDoc(containerW - 32, 0).x;
+        const availableInViewport = viewportRightDoc - docPt.x;
+        maxDocW = Math.max(260, Math.min(availableInViewport, 600));
+      }
+
+      const initialWidth = Math.min(260, maxDocW);
+      const initialHeight = Math.round(initialFontSize * 1.5) + 8;
+      const newId = 'text-' + Math.random().toString(36).substring(2, 9);
 
       const newText: TextObject = {
-        id: 'text-' + Math.random().toString(36).substring(2, 9),
+        id: newId,
         pageId: activePage ? activePage.id : null,
         type: 'text',
         layerId: 'layer-text',
         x: docPt.x,
         y: docPt.y,
-        width: 120,
-        height: Math.round(initialFontSize * 1.5),
+        width: initialWidth,
+        height: initialHeight,
         text: '',
         fontSize: initialFontSize,
         fontFamily: textConfig?.fontFamily || 'Caveat, cursive',
@@ -2105,6 +2099,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         text: '',
         x: newText.x,
         y: newText.y,
+        width: 320,
+        height: initialHeight,
         fontSize: newText.fontSize,
         fontFamily: newText.fontFamily,
         color: newText.color,
@@ -2485,26 +2481,50 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           if (initObj.type === 'text') {
             const txt = initObj as TextObject;
             if (handle.length === 2) {
-              // Corner handle: proportional font scaling
+              // Corner handle: proportional font scaling & width scaling
               const fontScale = (scaleX + scaleY) / 2;
               const nextFontSize = Math.max(8, Math.round((txt.fontSize || 20) * fontScale));
-              const dims = measureTextBounds(txt.text, nextFontSize, txt.fontFamily, txt.bold ?? false, txt.italic ?? false);
+              const newWidth = Math.max(50, Math.round(txt.width * scaleX));
+              const maxContentWidth = Math.max(30, newWidth - 12);
+              const lines = wrapTextLines(
+                txt.text,
+                maxContentWidth,
+                nextFontSize,
+                txt.fontFamily || 'Inter, sans-serif',
+                txt.bold ?? false,
+                txt.italic ?? false
+              );
+              const lineHeight = nextFontSize * 1.35;
+              const newHeight = Math.max(Math.round(nextFontSize * 1.5), Math.ceil(lines.length * lineHeight + 10));
               return {
                 ...txt,
                 x: targetX,
                 y: targetY,
                 fontSize: nextFontSize,
-                width: dims.width,
-                height: dims.height,
+                width: newWidth,
+                height: newHeight,
                 updatedAt: Date.now(),
               };
             }
-            // Side handle: adjust width
+            // Side handle: adjust width & re-wrap height
+            const newWidth = Math.max(50, Math.round(txt.width * scaleX));
+            const maxContentWidth = Math.max(30, newWidth - 12);
+            const lines = wrapTextLines(
+              txt.text,
+              maxContentWidth,
+              txt.fontSize,
+              txt.fontFamily || 'Inter, sans-serif',
+              txt.bold ?? false,
+              txt.italic ?? false
+            );
+            const lineHeight = txt.fontSize * 1.35;
+            const newHeight = Math.max(Math.round(txt.fontSize * 1.5), Math.ceil(lines.length * lineHeight + 10));
             return {
               ...txt,
               x: targetX,
               y: targetY,
-              width: Math.max(40, Math.round(txt.width * scaleX)),
+              width: newWidth,
+              height: newHeight,
               updatedAt: Date.now(),
             };
           }
@@ -2989,118 +3009,138 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
    * TEXT COMMIT HANDLER
    */
   const handleCommitText = (textValue: string) => {
-    if (!editingTextObj) return;
+    const activeText = editingTextObjRef.current || editingTextObj;
+    if (!activeText) return;
     const trimmed = textValue.trim();
 
     if (!trimmed) {
-      const remaining = doc.objects.filter((o) => o.id !== editingTextObj.id);
-      onUpdateDocument({ ...doc, objects: remaining }, true);
+      editingTextObjRef.current = null;
+      const remaining = (docRef.current?.objects || doc.objects).filter((o) => o.id !== activeText.id);
+      const updatedDoc = { ...(docRef.current || doc), objects: remaining };
+      docRef.current = updatedDoc;
+      rendererRef.current.clearTextCache();
+      clearTextMeasurementCache();
+      renderScene();
+      onUpdateDocument(updatedDoc, true);
       setEditingTextObj(null);
       return;
     }
 
     const targetPage =
-      doc.pages.find((p) => p.id === editingTextObj.pageId) ||
-      doc.pages.find(
-        (p) =>
-          editingTextObj.x >= p.x &&
-          editingTextObj.x <= p.x + p.width &&
-          editingTextObj.y >= p.y &&
-          editingTextObj.y <= p.y + p.height
-      ) ||
-      doc.pages.find((p) => p.id === doc.activePageId) ||
-      doc.pages[0];
+      (docRef.current || doc).pages.find((p) => p.id === activeText.pageId) ||
+      (docRef.current || doc).pages.find((p) => p.id === (docRef.current || doc).activePageId) ||
+      (docRef.current || doc).pages[0];
 
-    const containerW = containerRef.current?.clientWidth || 800;
-    let maxAllowedWidth = 650;
-    if (targetPage && editingTextObj.x >= targetPage.x && editingTextObj.x <= targetPage.x + targetPage.width) {
-      const rightMargin = 28;
-      const availableOnPage = (targetPage.x + targetPage.width - rightMargin) - editingTextObj.x;
-      maxAllowedWidth = Math.max(160, Math.min(availableOnPage, 650));
+    let finalWidth: number;
+    let finalHeight: number;
+
+    if (!activeText.isNew && activeText.width) {
+      // Existing text object: strictly preserve its established width without any layout shift!
+      finalWidth = activeText.width;
     } else {
-      const viewportRightDoc = cameraEngineRef.current.screenToDoc(containerW - 32, 0).x;
-      const availableInViewport = viewportRightDoc - editingTextObj.x;
-      maxAllowedWidth = Math.max(200, Math.min(availableInViewport, 650));
+      // New text object: determine width from actual rendered textarea size or measured content
+      const activeEl = activeTextareaRef.current;
+      const zoom = cameraEngineRef.current.getState().zoom;
+      if (activeEl && activeEl.offsetWidth > 0) {
+        finalWidth = Math.max(120, Math.round(activeEl.offsetWidth / zoom));
+      } else {
+        const dims = measureTextBounds(
+          textValue,
+          activeText.fontSize,
+          activeText.fontFamily,
+          activeText.bold ?? false,
+          activeText.italic ?? false
+        );
+        finalWidth = Math.min(650, Math.max(120, dims.width + 16));
+      }
     }
 
-    const dims = measureTextBounds(
+    const maxContentWidth = Math.max(30, finalWidth - 12);
+    const lines = wrapTextLines(
       textValue,
-      editingTextObj.fontSize,
-      editingTextObj.fontFamily,
-      editingTextObj.bold ?? false,
-      editingTextObj.italic ?? false
+      maxContentWidth,
+      activeText.fontSize,
+      activeText.fontFamily,
+      activeText.bold ?? false,
+      activeText.italic ?? false
     );
-    let calculatedWidth = dims.width;
-    let calculatedHeight = dims.height;
+    const lineHeight = activeText.fontSize * 1.35;
+    finalHeight = Math.max(Math.round(activeText.fontSize * 1.5), Math.ceil(lines.length * lineHeight + 10));
 
-    // Automatically wrap text if it exceeds available page or viewport boundaries
-    if (calculatedWidth > maxAllowedWidth) {
-      const wrappedLines = wrapTextLines(
-        textValue,
-        maxAllowedWidth - 12,
-        editingTextObj.fontSize,
-        editingTextObj.fontFamily,
-        editingTextObj.bold ?? false,
-        editingTextObj.italic ?? false
-      );
-      const wrappedDims = measureTextBounds(
-        wrappedLines.join('\n'),
-        editingTextObj.fontSize,
-        editingTextObj.fontFamily,
-        editingTextObj.bold ?? false,
-        editingTextObj.italic ?? false
-      );
-      calculatedWidth = Math.min(maxAllowedWidth, Math.max(160, wrappedDims.width));
-      calculatedHeight = wrappedDims.height;
-    }
+    const finalColor = resolveThemeTextColor(activeText.color, theme);
+    const currentObjs = docRef.current?.objects || doc.objects;
+    const exists = currentObjs.some((o) => o.id === activeText.id);
 
-    if (editingTextObj.isNew) {
+    let updatedObjects: CanvasObject[];
+    if (activeText.isNew || !exists) {
       const newText: TextObject = {
-        id: editingTextObj.id,
+        id: activeText.id,
         pageId: targetPage ? targetPage.id : null,
         type: 'text',
         layerId: 'layer-text',
-        x: editingTextObj.x,
-        y: editingTextObj.y,
-        width: calculatedWidth,
-        height: calculatedHeight,
+        x: activeText.x,
+        y: activeText.y,
+        width: finalWidth,
+        height: finalHeight,
         text: textValue,
-        fontSize: editingTextObj.fontSize,
-        fontFamily: editingTextObj.fontFamily,
-        color: editingTextObj.color,
-        align: editingTextObj.align || 'left',
-        bold: editingTextObj.bold,
-        italic: editingTextObj.italic,
-        underline: editingTextObj.underline,
-        opacity: editingTextObj.opacity ?? 1,
+        fontSize: activeText.fontSize,
+        fontFamily: activeText.fontFamily,
+        color: finalColor,
+        align: activeText.align || 'left',
+        bold: activeText.bold,
+        italic: activeText.italic,
+        underline: activeText.underline,
+        opacity: activeText.opacity ?? 1,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         deviceId: 'local',
       };
-      onUpdateDocument({ ...doc, objects: [...doc.objects, newText] }, true);
+      updatedObjects = exists
+        ? currentObjs.map((o) => (o.id === newText.id ? newText : o))
+        : [...currentObjs, newText];
     } else {
-      const updated = doc.objects.map((o) =>
-        o.id === editingTextObj.id
+      updatedObjects = currentObjs.map((o) =>
+        o.id === activeText.id
           ? {
               ...o,
               text: textValue,
-              width: calculatedWidth,
-              height: calculatedHeight,
-              fontSize: editingTextObj.fontSize,
-              fontFamily: editingTextObj.fontFamily,
-              color: editingTextObj.color,
-              align: editingTextObj.align,
-              bold: editingTextObj.bold,
-              italic: editingTextObj.italic,
-              underline: editingTextObj.underline,
-              opacity: editingTextObj.opacity,
+              width: finalWidth,
+              height: finalHeight,
+              fontSize: activeText.fontSize,
+              fontFamily: activeText.fontFamily,
+              color: finalColor,
+              align: activeText.align,
+              bold: activeText.bold,
+              italic: activeText.italic,
+              underline: activeText.underline,
+              opacity: activeText.opacity,
               updatedAt: Date.now(),
             }
           : o
       ) as CanvasObject[];
-      onUpdateDocument({ ...doc, objects: updated }, true);
     }
 
+    const updatedDoc = {
+      ...(docRef.current || doc),
+      objects: updatedObjects,
+    };
+
+    // Synchronously commit to ref and clear measurement caches
+    editingTextObjRef.current = null;
+    docRef.current = updatedDoc;
+    rendererRef.current.clearTextCache();
+    clearTextMeasurementCache();
+
+    // Instant synchronous canvas redraw: eliminated the millisecond blank flicker!
+    renderScene();
+
+    onUpdateDocument(updatedDoc, true);
+    onSelectIds?.([activeText.id]);
+    setSelection({
+      selectedIds: [activeText.id],
+      bounds: { x: activeText.x, y: activeText.y, width: finalWidth, height: finalHeight },
+      mode: 'idle',
+    });
     setEditingTextObj(null);
   };
 
@@ -3173,6 +3213,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         text: hitText.text,
         x: hitText.x,
         y: hitText.y,
+        width: hitText.width,
+        height: hitText.height,
         fontSize: hitText.fontSize,
         fontFamily: hitText.fontFamily,
         color: hitText.color,
@@ -3183,6 +3225,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         opacity: hitText.opacity,
         isNew: false,
       });
+      onSelectIds?.([hitText.id]);
       return;
     }
 
@@ -3249,9 +3292,9 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     const now = performance.now();
     const dist = Math.hypot(screenX - clickCountRef.current.x, screenY - clickCountRef.current.y);
 
-    const TRIPLE_CLICK_THRESHOLD_MS = 220; // Reduced by half (from 450ms) for fast writers
+    const TRIPLE_CLICK_THRESHOLD_MS = 450;
 
-    if (now - clickCountRef.current.lastTime < TRIPLE_CLICK_THRESHOLD_MS && dist < 25) {
+    if (now - clickCountRef.current.lastTime < TRIPLE_CLICK_THRESHOLD_MS && dist < 35) {
       clickCountRef.current.count += 1;
     } else {
       clickCountRef.current.count = 1;
@@ -3260,29 +3303,74 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     clickCountRef.current.x = screenX;
     clickCountRef.current.y = screenY;
 
-    // TRIPLE CLICK TRIGGER: Requires 3 consecutive fast clicks within 220ms
+    // TRIPLE CLICK TRIGGER: Requires 3 consecutive fast clicks within 450ms
     if (clickCountRef.current.count >= 3) {
       clickCountRef.current.count = 0; // reset
       const docPt = cameraEngineRef.current.screenToDoc(screenX, screenY);
 
-      // Don't spawn text if clicking on table or existing object
+      // Don't spawn text if clicking on table
       const hitObj = doc.objects.slice().reverse().find((o) => isPointInObject(o, docPt));
       if (hitObj && hitObj.type === 'table') return;
 
+      if (hitObj && hitObj.type === 'text') {
+        const hitText = hitObj as TextObject;
+        setEditingTextObj({
+          id: hitText.id,
+          pageId: hitText.pageId,
+          text: hitText.text,
+          x: hitText.x,
+          y: hitText.y,
+          width: hitText.width,
+          height: hitText.height,
+          fontSize: hitText.fontSize,
+          fontFamily: hitText.fontFamily,
+          color: hitText.color,
+          align: hitText.align,
+          bold: hitText.bold ?? false,
+          italic: hitText.italic ?? false,
+          underline: hitText.underline ?? false,
+          opacity: hitText.opacity,
+          isNew: false,
+        });
+        if (onSelectTool && activeTool !== 'select') {
+          onSelectTool('select');
+        }
+        return;
+      }
+
+      // If pen was active, remove any accidental dot strokes created by the 3 rapid taps
+      if (activeTool === 'pen') {
+        const strokeThreshold = 25;
+        const cleanedObjects = doc.objects.filter((o) => {
+          if (o.type !== 'stroke') return true;
+          const s = o as StrokeObject;
+          const isRecent = Date.now() - s.createdAt < 1500;
+          const isTinyDot = s.points.length <= 4;
+          const isNear = Math.hypot(s.x - docPt.x, s.y - docPt.y) < strokeThreshold;
+          return !(isRecent && isTinyDot && isNear);
+        });
+        if (cleanedObjects.length !== doc.objects.length) {
+          onUpdateDocument({ ...doc, objects: cleanedObjects }, false);
+        }
+      }
+
       const newId = 'text-' + Math.random().toString(36).substring(2, 9);
-      const defaultColor = theme === 'dark' ? '#f4f4f5' : '#1e1e1e';
-      const fontColor = textConfig?.color || defaultColor;
+      const fontColor = resolveThemeTextColor(textConfig?.color, theme);
       const initialFontSize = textConfig?.fontSize || 20;
 
       const targetPage = doc.pages.find((p) => p.id === doc.activePageId) || doc.pages[0];
+      const initialHeight = Math.round(initialFontSize * 1.5) + 8;
+
       setEditingTextObj({
         id: newId,
         pageId: targetPage ? targetPage.id : null,
         text: '',
         x: docPt.x,
         y: docPt.y,
+        width: 320,
+        height: initialHeight,
         fontSize: initialFontSize,
-        fontFamily: textConfig?.fontFamily || 'Caveat, cursive',
+        fontFamily: textConfig?.fontFamily || "'Patrick Hand', 'Virgil', -apple-system, sans-serif",
         color: fontColor,
         align: textConfig?.align || 'left',
         bold: textConfig?.bold ?? false,
@@ -3291,6 +3379,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         opacity: textConfig?.opacity ?? 1,
         isNew: true,
       });
+
+      if (onSelectTool && activeTool !== 'select') {
+        onSelectTool('select');
+      }
     }
   };
 
@@ -3549,17 +3641,42 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
     const ZOOM_LEVELS = [0.10, 0.15, 0.25, 0.33, 0.50, 0.67, 0.75, 0.90, 1.00, 1.25, 1.50, 1.75, 2.00, 2.50, 3.00, 4.00, 5.00];
 
-    const handleCustomZoomIn = () => {
+    const handleCustomZoomIn = (e?: Event) => {
+      const customEvent = e as CustomEvent<{ delta?: number; factor?: number; scrub?: boolean }> | undefined;
       const rect = containerRef.current?.getBoundingClientRect();
       const current = cameraEngineRef.current.getState().zoom;
+
+      if (customEvent?.detail?.scrub || customEvent?.detail?.delta != null || customEvent?.detail?.factor != null) {
+        const factor = customEvent.detail.factor ?? Math.pow(2, (customEvent.detail.delta ?? 10) * 0.006);
+        cameraEngineRef.current.zoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, factor);
+        return;
+      }
+
       const next = ZOOM_LEVELS.find((lvl) => lvl > current + 0.005) ?? Math.min(5.0, current * 1.25);
       cameraEngineRef.current.smoothZoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, next, 180);
     };
-    const handleCustomZoomOut = () => {
+    const handleCustomZoomOut = (e?: Event) => {
+      const customEvent = e as CustomEvent<{ delta?: number; factor?: number; scrub?: boolean }> | undefined;
       const rect = containerRef.current?.getBoundingClientRect();
       const current = cameraEngineRef.current.getState().zoom;
+
+      if (customEvent?.detail?.scrub || customEvent?.detail?.delta != null || customEvent?.detail?.factor != null) {
+        const factor = customEvent.detail.factor ?? Math.pow(2, (customEvent.detail.delta ?? -10) * 0.006);
+        cameraEngineRef.current.zoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, factor);
+        return;
+      }
+
       const prev = [...ZOOM_LEVELS].reverse().find((lvl) => lvl < current - 0.005) ?? Math.max(0.10, current / 1.25);
       cameraEngineRef.current.smoothZoomAt((rect?.width || 800) / 2, (rect?.height || 600) / 2, prev, 180);
+    };
+    const handleCustomZoomScrub = (e: Event) => {
+      const customEvent = e as CustomEvent<{ deltaX?: number; deltaY?: number; delta?: number; factor?: number }>;
+      const rect = containerRef.current?.getBoundingClientRect();
+      const screenX = (rect?.width || 800) / 2;
+      const screenY = (rect?.height || 600) / 2;
+      const delta = customEvent.detail?.delta ?? customEvent.detail?.deltaX ?? 0;
+      const factor = customEvent.detail?.factor ?? Math.pow(2, delta * 0.006);
+      cameraEngineRef.current.zoomAt(screenX, screenY, factor);
     };
     const handleCustomZoomReset = () => {
       const rect = containerRef.current?.getBoundingClientRect();
@@ -3814,22 +3931,34 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         const docCenter = cameraEngineRef.current.screenToDoc(screenCenterX, screenCenterY);
         const activePage = doc.pages.find((p) => p.id === doc.activePageId) || doc.pages[0];
 
-        const defaultColor = theme === 'dark' ? '#f4f4f5' : '#1e1e1e';
+        let textToInsert = plainText;
+        if (plainText.includes('"type":"excalidraw/clipboard"') || plainText.startsWith('{"type":"excalidraw/clipboard"')) {
+          try {
+            const parsed = JSON.parse(plainText);
+            if (parsed.elements && Array.isArray(parsed.elements)) {
+              const textEls = parsed.elements.filter((el: any) => el.type === 'text' && (el.text || el.originalText));
+              if (textEls.length > 0) {
+                textToInsert = textEls.map((el: any) => el.text || el.originalText).join('\n\n');
+              }
+            }
+          } catch {
+            // Keep plainText as fallback
+          }
+        }
+
+        const targetColor = resolveThemeTextColor(textConfig?.color, theme);
         const fontSize = textConfig?.fontSize || 20;
         const fontFamily = textConfig?.fontFamily || 'Inter, sans-serif';
 
-        let startX = Math.round(docCenter.x - 160);
-        let startY = Math.round(docCenter.y - 20);
+        const desiredW = Math.min(650, activePage ? Math.max(360, activePage.width - 64) : 650);
+        let startX = activePage
+          ? Math.max(activePage.x + 32, Math.min(Math.round(docCenter.x - desiredW / 2), activePage.x + activePage.width - desiredW - 32))
+          : Math.round(docCenter.x - desiredW / 2);
+        let startY = Math.round(docCenter.y - 40);
 
-        let maxAllowedW = 600;
-        if (activePage) {
-          const margin = 32;
-          startX = Math.max(activePage.x + margin, Math.min(startX, activePage.x + activePage.width - 200));
-          maxAllowedW = Math.max(200, (activePage.x + activePage.width - margin) - startX);
-        }
-
-        const wrappedLines = wrapTextLines(plainText, maxAllowedW - 12, fontSize, fontFamily, false, false);
+        const wrappedLines = wrapTextLines(textToInsert, desiredW - 12, fontSize, fontFamily, false, false);
         const dims = measureTextBounds(wrappedLines.join('\n'), fontSize, fontFamily, false, false);
+        const finalWidth = Math.min(desiredW, Math.max(160, dims.width));
 
         const newText: TextObject = {
           id: 'text-' + Math.random().toString(36).substring(2, 9),
@@ -3838,12 +3967,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           layerId: 'layer-text',
           x: startX,
           y: startY,
-          width: Math.min(maxAllowedW, Math.max(160, dims.width)),
+          width: finalWidth,
           height: dims.height,
-          text: plainText,
+          text: textToInsert,
           fontSize,
           fontFamily,
-          color: textConfig?.color || defaultColor,
+          color: targetColor,
           align: textConfig?.align || 'left',
           bold: textConfig?.bold ?? false,
           italic: textConfig?.italic ?? false,
@@ -3873,6 +4002,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     window.addEventListener('paste', handlePaste);
     window.addEventListener('canvas:zoom-in', handleCustomZoomIn);
     window.addEventListener('canvas:zoom-out', handleCustomZoomOut);
+    window.addEventListener('canvas:zoom-scrub', handleCustomZoomScrub);
     window.addEventListener('canvas:zoom-reset', handleCustomZoomReset);
     window.addEventListener('canvas:zoom-fit', handleCustomZoomFit);
     window.addEventListener('canvas:navigate-center', handleNavigateCenter);
@@ -3886,6 +4016,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       window.removeEventListener('paste', handlePaste);
       window.removeEventListener('canvas:zoom-in', handleCustomZoomIn);
       window.removeEventListener('canvas:zoom-out', handleCustomZoomOut);
+      window.removeEventListener('canvas:zoom-scrub', handleCustomZoomScrub);
       window.removeEventListener('canvas:zoom-reset', handleCustomZoomReset);
       window.removeEventListener('canvas:zoom-fit', handleCustomZoomFit);
       window.removeEventListener('canvas:navigate-center', handleNavigateCenter);
@@ -4024,25 +4155,51 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           doc.pages.find(
             (p) =>
               editingTextObj.x >= p.x &&
-              editingTextObj.x <= p.x + p.width &&
+              editingTextObj.x <= p.x + (editingTextObj.width || 200) &&
               editingTextObj.y >= p.y &&
-              editingTextObj.y <= p.y + p.height
+              editingTextObj.y <= p.y + (editingTextObj.height || 50)
           ) ||
           doc.pages.find((p) => p.id === doc.activePageId) ||
           doc.pages[0];
 
-        const containerW = containerRef.current?.clientWidth || 800;
-        let maxDocW = 650;
-        if (targetPage && editingTextObj.x >= targetPage.x && editingTextObj.x <= targetPage.x + targetPage.width) {
-          const rightMargin = 28;
-          const availableOnPage = (targetPage.x + targetPage.width - rightMargin) - editingTextObj.x;
-          maxDocW = Math.max(160, Math.min(availableOnPage, 650));
-        } else {
-          const viewportRightDoc = cameraEngineRef.current.screenToDoc(containerW - 32, 0).x;
-          const availableInViewport = viewportRightDoc - editingTextObj.x;
-          maxDocW = Math.max(200, Math.min(availableInViewport, 650));
-        }
-        const maxScreenW = maxDocW * cameraState.zoom;
+        const isExisting = !editingTextObj.isNew && !!editingTextObj.width;
+        // Strictly lock existing text objects to their established width so layout NEVER shifts!
+        const initialDocW = isExisting
+          ? editingTextObj.width!
+          : Math.min(editingTextObj.width || 320, 600);
+        const displayColor = resolveThemeTextColor(editingTextObj.color, theme);
+        const zoom = cameraState.zoom;
+
+        const adjustTextareaSize = (el: HTMLTextAreaElement | null) => {
+          if (!el) return;
+          const currentZoom = cameraEngineRef.current.getState().zoom;
+          const textVal = el.value || '';
+
+          if (editingTextObj.isNew) {
+            const lines = textVal.split('\n');
+            let maxLineW = 0;
+            for (const l of lines) {
+              const b = measureTextBounds(
+                l || 'W',
+                editingTextObj.fontSize,
+                editingTextObj.fontFamily,
+                editingTextObj.bold ?? false,
+                editingTextObj.italic ?? false
+              );
+              if (b.width > maxLineW) maxLineW = b.width;
+            }
+            const naturalW = maxLineW + 16;
+            const targetDocW = Math.max(120, Math.min(650, naturalW));
+            el.style.width = `${targetDocW * currentZoom}px`;
+          } else {
+            // Existing text: width is strictly locked to initialDocW!
+            el.style.width = `${initialDocW * currentZoom}px`;
+          }
+
+          el.style.height = 'auto';
+          const minHeight = Math.max(28 * currentZoom, Math.round(editingTextObj.fontSize * 1.5 * currentZoom));
+          el.style.height = `${Math.max(minHeight, el.scrollHeight)}px`;
+        };
 
         return (
           <div
@@ -4051,63 +4208,54 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
               left: editingTextObj.x * cameraState.zoom + cameraState.x,
               top: editingTextObj.y * cameraState.zoom + cameraState.y,
               zIndex: 60,
-              pointerEvents: activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current ? 'none' : 'auto',
+              pointerEvents: activeTool === 'laser' || isDrawingRef.current ? 'none' : 'auto',
             }}
             onClick={(e) => {
-              if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+              if (activeTool === 'laser' || isDrawingRef.current) return;
               e.stopPropagation();
             }}
             onPointerDown={(e) => {
-              if (activeTool === 'pen' || activeTool === 'eraser' || activeTool === 'laser' || isDrawingRef.current) return;
+              if (activeTool === 'laser' || isDrawingRef.current) return;
               e.stopPropagation();
             }}
           >
             <textarea
               ref={(el) => {
                 activeTextareaRef.current = el;
-                if (el) {
-                  el.style.width = 'auto';
-                  const targetW = Math.min(maxScreenW, Math.max(80, el.scrollWidth + 12));
-                  el.style.width = `${targetW}px`;
-                  el.style.height = 'auto';
-                  el.style.height = `${Math.max(28, el.scrollHeight)}px`;
-                }
+                adjustTextareaSize(el);
               }}
               autoFocus
               defaultValue={editingTextObj.text}
               placeholder=""
               style={{
-                fontSize: `${editingTextObj.fontSize * cameraState.zoom}px`,
+                width: `${initialDocW * zoom}px`,
+                minWidth: isExisting ? `${initialDocW * zoom}px` : `${120 * zoom}px`,
+                maxWidth: isExisting ? 'none' : `${650 * zoom}px`,
+                fontSize: `${editingTextObj.fontSize * zoom}px`,
                 lineHeight: 1.35,
                 fontFamily: editingTextObj.fontFamily,
                 fontWeight: editingTextObj.bold ? '600' : '400',
                 fontStyle: editingTextObj.italic ? 'italic' : 'normal',
                 textDecoration: editingTextObj.underline ? 'underline' : 'none',
-                color: editingTextObj.color,
-                caretColor: editingTextObj.color,
+                color: displayColor,
+                caretColor: displayColor,
                 textAlign: editingTextObj.align || 'left',
                 opacity: editingTextObj.opacity ?? 1,
                 background: 'transparent',
-                border: '1px solid rgba(59, 130, 246, 0.5)',
+                border: '1px solid rgba(59, 130, 246, 0.65)',
                 borderRadius: '3px',
                 outline: 'none',
-                padding: '0px 4px',
+                padding: `${4 * zoom}px ${6 * zoom}px`,
                 margin: 0,
                 resize: 'none',
                 overflow: 'hidden',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
-                maxWidth: `${maxScreenW}px`,
                 boxSizing: 'border-box',
                 display: 'block',
               }}
               onInput={(e) => {
-                const el = e.currentTarget;
-                el.style.width = 'auto';
-                const targetW = Math.min(maxScreenW, Math.max(80, el.scrollWidth + 12));
-                el.style.width = `${targetW}px`;
-                el.style.height = 'auto';
-                el.style.height = `${Math.max(28, el.scrollHeight)}px`;
+                adjustTextareaSize(e.currentTarget);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
