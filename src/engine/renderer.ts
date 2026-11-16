@@ -156,9 +156,11 @@ export class CanvasRenderer {
     pages: PageFrame[],
     currentMode: 'notebook' | 'canvas',
     theme: 'light' | 'dark' | 'paper',
-    customBgColor?: string
+    customBgColor?: string,
+    dpr: number = 1
   ) {
     ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.clearRect(0, 0, width, height);
@@ -197,9 +199,11 @@ export class CanvasRenderer {
     currentMode: 'notebook' | 'canvas',
     theme: 'light' | 'dark' | 'paper',
     customBgColor?: string,
-    skipBackground = false
+    skipBackground = false,
+    dpr: number = 1
   ): number {
     ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.clearRect(0, 0, width, height);
@@ -1523,8 +1527,11 @@ export class CanvasRenderer {
     activeTool?: string,
     eraserRadius?: number,
     liveShape?: { shape: ShapeObject; startPt: { x: number; y: number }; currentPt: { x: number; y: number } } | null,
-    snapFlash?: { shape: ShapeObject; progress: number } | null
+    snapFlash?: { shape: ShapeObject; progress: number } | null,
+    dpr: number = 1
   ) {
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     ctx.save();
@@ -1785,5 +1792,7 @@ export class CanvasRenderer {
       ctx.fillText(badgeText, pillX + pillW / 2, pillY + pillH / 2);
       ctx.restore();
     }
+
+    ctx.restore();
   }
 }

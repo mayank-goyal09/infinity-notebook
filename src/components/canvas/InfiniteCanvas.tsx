@@ -584,6 +584,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     const overlayCtx = overlayCanvas.getContext('2d', { desynchronized: true });
     if (!overlayCtx) return;
     const camera = cameraEngineRef.current.getState();
+    const dpr = window.devicePixelRatio || 1;
+    const container = containerRef.current;
+    const cssW = container ? container.clientWidth : Math.round(overlayCanvas.width / dpr);
+    const cssH = container ? container.clientHeight : Math.round(overlayCanvas.height / dpr);
 
     let snapFlashData: { shape: ShapeObject; progress: number } | null = null;
     if (snapFlashRef.current) {
@@ -600,8 +604,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
     rendererRef.current.renderOverlay(
       overlayCtx,
-      overlayCanvas.width,
-      overlayCanvas.height,
+      cssW,
+      cssH,
       camera,
       livePointsRef.current,
       liveStrokeConfigRef.current,
@@ -612,7 +616,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       activeTool,
       (eraserSize || 24) / camera.zoom,
       liveShapeRef.current,
-      snapFlashData
+      snapFlashData,
+      dpr
     );
   }, [selection, clickToInkState, activeTool, eraserSize]);
 
@@ -643,6 +648,10 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
     const camera = cameraEngineRef.current.getState();
     const currentDoc = docRef.current || doc;
+    const dpr = window.devicePixelRatio || 1;
+    const container = containerRef.current;
+    const cssW = container ? container.clientWidth : 800;
+    const cssH = container ? container.clientHeight : 600;
 
     // Layer 0: Background Canvas (Fill, spreadsheet grid lines, and page frames)
     if (bgCanvas) {
@@ -650,13 +659,14 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       if (bgCtx) {
         rendererRef.current.renderBackground(
           bgCtx,
-          bgCanvas.width,
-          bgCanvas.height,
+          cssW,
+          cssH,
           camera,
           currentDoc.pages,
           currentDoc.currentMode,
           theme,
-          canvasBg
+          canvasBg,
+          dpr
         );
       }
     }
@@ -686,15 +696,16 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
 
     const renderedCount = rendererRef.current.renderDocument(
       docCtx,
-      docCanvas.width,
-      docCanvas.height,
+      cssW,
+      cssH,
       camera,
       currentDoc.pages,
       canvasObjectsToRender,
       currentDoc.currentMode,
       theme,
       canvasBg,
-      true // skipBackground = true (100% transparent so sketches appear ON TOP of Layer 1 tables!)
+      true, // skipBackground = true (100% transparent so sketches appear ON TOP of Layer 1 tables!)
+      dpr
     );
 
     // Suppress selection bounding box over text when actively editing it
@@ -706,8 +717,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     // Render transient overlay layer (live ink, laser, handles, eraser indicator, live shape)
     rendererRef.current.renderOverlay(
       overlayCtx,
-      overlayCanvas.width,
-      overlayCanvas.height,
+      cssW,
+      cssH,
       camera,
       livePointsRef.current,
       liveStrokeConfigRef.current,
@@ -717,7 +728,9 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       cursorPosRef.current,
       activeTool,
       (eraserSize || 24) / camera.zoom,
-      liveShapeRef.current
+      liveShapeRef.current,
+      null,
+      dpr
     );
 
     const frameTime = performance.now() - t0;
@@ -755,19 +768,24 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       if (!docCanvas) return;
       const camera = cameraEngineRef.current.getState();
       const currentDoc = docRef.current || doc;
+      const dpr = window.devicePixelRatio || 1;
+      const container = containerRef.current;
+      const cssW = container ? container.clientWidth : 800;
+      const cssH = container ? container.clientHeight : 600;
 
       if (bgCanvas) {
         const bgCtx = bgCanvas.getContext('2d');
         if (bgCtx) {
           rendererRef.current.renderBackground(
             bgCtx,
-            bgCanvas.width,
-            bgCanvas.height,
+            cssW,
+            cssH,
             camera,
             currentDoc.pages,
             currentDoc.currentMode,
             theme,
-            canvasBg
+            canvasBg,
+            dpr
           );
         }
       }
@@ -779,9 +797,11 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         pendingCommittedStrokeRef.current = null;
       }
       const baseObjects = activeDragObjectsRef.current || activeEraserObjectsRef.current || currentDoc.objects;
-      const objectsWithoutEditing = editingTextObj
-        ? baseObjects.filter((o) => o.id !== editingTextObj.id)
-        : (editingStickyObj ? baseObjects.filter((o) => o.id !== editingStickyObj.id) : baseObjects);
+      const activeEditingTextId = editingTextObjRef.current?.id;
+      const activeEditingStickyId = editingStickyObj?.id;
+      const objectsWithoutEditing = activeEditingTextId
+        ? baseObjects.filter((o) => o.id !== activeEditingTextId)
+        : (activeEditingStickyId ? baseObjects.filter((o) => o.id !== activeEditingStickyId) : baseObjects);
       const objectsToRender =
         pending && !objectsWithoutEditing.some((o) => o.id === pending.id)
           ? [...objectsWithoutEditing, pending]
@@ -789,15 +809,16 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       const canvasObjectsToRender = objectsToRender.filter((o) => o.type !== 'table');
       rendererRef.current.renderDocument(
         docCtx,
-        docCanvas.width,
-        docCanvas.height,
+        cssW,
+        cssH,
         camera,
         currentDoc.pages,
         canvasObjectsToRender,
         currentDoc.currentMode,
         theme,
         canvasBg,
-        true // skipBackground = true
+        true, // skipBackground = true
+        dpr
       );
     });
   }, [doc.pages, doc.objects, doc.currentMode, theme, canvasBg, editingTextObj, editingStickyObj]);
@@ -814,21 +835,31 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
       const h = container.clientHeight;
       if (w === 0 || h === 0) return;
 
+      const dpr = window.devicePixelRatio || 1;
+      const targetW = Math.round(w * dpr);
+      const targetH = Math.round(h * dpr);
+
       let changed = false;
       const bgCanvas = bgCanvasRef.current;
-      if (bgCanvas && (bgCanvas.width !== w || bgCanvas.height !== h)) {
-        bgCanvas.width = w;
-        bgCanvas.height = h;
+      if (bgCanvas && (bgCanvas.width !== targetW || bgCanvas.height !== targetH)) {
+        bgCanvas.width = targetW;
+        bgCanvas.height = targetH;
+        bgCanvas.style.width = `${w}px`;
+        bgCanvas.style.height = `${h}px`;
         changed = true;
       }
-      if (docCanvas.width !== w || docCanvas.height !== h) {
-        docCanvas.width = w;
-        docCanvas.height = h;
+      if (docCanvas.width !== targetW || docCanvas.height !== targetH) {
+        docCanvas.width = targetW;
+        docCanvas.height = targetH;
+        docCanvas.style.width = `${w}px`;
+        docCanvas.style.height = `${h}px`;
         changed = true;
       }
-      if (overlayCanvas.width !== w || overlayCanvas.height !== h) {
-        overlayCanvas.width = w;
-        overlayCanvas.height = h;
+      if (overlayCanvas.width !== targetW || overlayCanvas.height !== targetH) {
+        overlayCanvas.width = targetW;
+        overlayCanvas.height = targetH;
+        overlayCanvas.style.width = `${w}px`;
+        overlayCanvas.style.height = `${h}px`;
         changed = true;
       }
 
@@ -1330,7 +1361,9 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         if (docCanvas) {
           const docCtx = docCanvas.getContext('2d');
           if (docCtx) {
+            const dpr = window.devicePixelRatio || 1;
             docCtx.save();
+            docCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
             docCtx.translate(camera.x, camera.y);
             docCtx.scale(camera.zoom, camera.zoom);
             rendererRef.current.renderStroke(docCtx, newStroke, camera.zoom, true);
