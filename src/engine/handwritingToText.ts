@@ -1,5 +1,5 @@
 import { StrokeObject, StrokePoint, TextObject } from '../types/document';
-import { measureTextBounds } from './textMeasurement';
+import { measureTextBounds, wrapTextLines } from './textMeasurement';
 import { simplifyPoints } from './smoothing';
 
 export interface HandwritingRecognitionResult {
@@ -211,13 +211,12 @@ export function createTextFromHandwriting(
   color: string = '#1e1e1e',
   fontFamily: string = 'Caveat, cursive'
 ): TextObject {
-  const { width, height } = measureTextBounds(
-    result.text,
-    result.suggestedFontSize,
-    fontFamily,
-    false,
-    false
-  );
+  const targetWidth = Math.max(120, Math.round(result.bounds.width));
+  const maxContentW = Math.max(30, targetWidth - 12);
+  const lines = wrapTextLines(result.text, maxContentW, result.suggestedFontSize, fontFamily, false, false);
+  const lineHeight = result.suggestedFontSize * 1.35;
+  const wrappedHeight = Math.max(Math.round(result.suggestedFontSize * 1.5), Math.ceil(lines.length * lineHeight + 10));
+  const finalHeight = Math.max(Math.round(result.bounds.height), wrappedHeight);
 
   return {
     id: 'text-' + Math.random().toString(36).substring(2, 9),
@@ -226,8 +225,8 @@ export function createTextFromHandwriting(
     layerId: 'layer-text',
     x: Math.round(result.bounds.x),
     y: Math.round(result.bounds.y),
-    width: Math.max(result.bounds.width, width),
-    height: Math.max(result.bounds.height, height),
+    width: targetWidth,
+    height: finalHeight,
     text: result.text,
     fontSize: result.suggestedFontSize,
     fontFamily: fontFamily,
