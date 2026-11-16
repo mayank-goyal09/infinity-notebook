@@ -16,7 +16,7 @@ import {
   EmbedObject,
 } from '../types/document';
 import { evaluateTableBalance } from './accountingFormats';
-import { wrapTextLines } from './textMeasurement';
+import { wrapTextLines, resolveThemeTextColor } from './textMeasurement';
 import { catmullRomToBezier, calibrateHardwarePressure } from './smoothing';
 import { getStroke } from 'perfect-freehand';
 
@@ -81,6 +81,10 @@ export class CanvasRenderer {
     }
     this.textLayoutCache.set(key, lines);
     return lines;
+  }
+
+  public clearTextCache() {
+    this.textLayoutCache.clear();
   }
 
   /**
@@ -520,7 +524,7 @@ export class CanvasRenderer {
         this.renderShape(ctx, obj);
         break;
       case 'text':
-        this.renderText(ctx, obj);
+        this.renderText(ctx, obj, theme);
         break;
       case 'sticky':
         this.renderStickyNote(ctx, obj);
@@ -1194,12 +1198,17 @@ export class CanvasRenderer {
     ctx.stroke();
   }
 
-  public renderText(ctx: CanvasRenderingContext2D, textObj: TextObject) {
+  public renderText(
+    ctx: CanvasRenderingContext2D,
+    textObj: TextObject,
+    theme: 'light' | 'dark' | 'paper' = 'light'
+  ) {
     ctx.save();
     if (textObj.opacity !== undefined) {
       ctx.globalAlpha = textObj.opacity;
     }
-    ctx.fillStyle = textObj.color;
+    const resolvedColor = resolveThemeTextColor(textObj.color, theme);
+    ctx.fillStyle = resolvedColor;
     const fontStyle = textObj.italic ? 'italic ' : '';
     const fontWeight = textObj.bold ? '600 ' : '400 ';
     ctx.font = `${fontStyle}${fontWeight}${textObj.fontSize}px ${textObj.fontFamily || 'Inter, sans-serif'}`;
@@ -1238,7 +1247,9 @@ export class CanvasRenderer {
       let lineX = textObj.x + 4;
       if (align === 'center') lineX = textObj.x + boxWidth / 2;
       else if (align === 'right') lineX = textObj.x + boxWidth - 4;
-      ctx.fillText(line, lineX, textObj.y + 4 + index * lineHeight);
+      const lineY = textObj.y + 4 + index * lineHeight;
+      // Pixel-snapping prevents subpixel font blur on displays with fractional DPR/zoom
+      ctx.fillText(line, Math.round(lineX), Math.round(lineY));
 
       // Underline support
       if (textObj.underline && line) {
@@ -1246,12 +1257,12 @@ export class CanvasRenderer {
         let startX = lineX;
         if (align === 'center') startX = lineX - textMetrics.width / 2;
         else if (align === 'right') startX = lineX - textMetrics.width;
-        const underlineY = textObj.y + 4 + index * lineHeight + textObj.fontSize * 1.1;
+        const underlineY = Math.round(lineY + textObj.fontSize * 1.1);
         ctx.lineWidth = Math.max(1.2, textObj.fontSize / 16);
-        ctx.strokeStyle = textObj.color;
+        ctx.strokeStyle = resolvedColor;
         ctx.beginPath();
-        ctx.moveTo(startX, underlineY);
-        ctx.lineTo(startX + textMetrics.width, underlineY);
+        ctx.moveTo(Math.round(startX), underlineY);
+        ctx.lineTo(Math.round(startX + textMetrics.width), underlineY);
         ctx.stroke();
       }
     });
