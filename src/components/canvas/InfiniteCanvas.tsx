@@ -3227,8 +3227,9 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   };
 
   // Track consecutive clicks for triple-click text insertion
-  const clickCountRef = useRef<{ count: number; lastTime: number; x: number; y: number }>({
+  const clickCountRef = useRef<{ count: number; startTime: number; lastTime: number; x: number; y: number }>({
     count: 0,
+    startTime: 0,
     lastTime: 0,
     x: 0,
     y: 0,
@@ -3341,18 +3342,23 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     const now = performance.now();
     const dist = Math.hypot(screenX - clickCountRef.current.x, screenY - clickCountRef.current.y);
 
-    const TRIPLE_CLICK_THRESHOLD_MS = 450;
+    const TRIPLE_CLICK_THRESHOLD_MS = 400;
 
-    if (now - clickCountRef.current.lastTime < TRIPLE_CLICK_THRESHOLD_MS && dist < 35) {
+    if (
+      clickCountRef.current.count > 0 &&
+      now - clickCountRef.current.startTime < TRIPLE_CLICK_THRESHOLD_MS &&
+      dist < 35
+    ) {
       clickCountRef.current.count += 1;
     } else {
       clickCountRef.current.count = 1;
+      clickCountRef.current.startTime = now;
     }
     clickCountRef.current.lastTime = now;
     clickCountRef.current.x = screenX;
     clickCountRef.current.y = screenY;
 
-    // TRIPLE CLICK TRIGGER: Requires 3 consecutive fast clicks within 450ms
+    // TRIPLE CLICK TRIGGER: Requires 3 consecutive fast clicks within 400ms
     if (clickCountRef.current.count >= 3) {
       clickCountRef.current.count = 0; // reset
       const docPt = cameraEngineRef.current.screenToDoc(screenX, screenY);
@@ -3381,9 +3387,6 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
           opacity: hitText.opacity,
           isNew: false,
         });
-        if (onSelectTool && activeTool !== 'select') {
-          onSelectTool('select');
-        }
         return;
       }
 
@@ -3428,10 +3431,6 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         opacity: textConfig?.opacity ?? 1,
         isNew: true,
       });
-
-      if (onSelectTool && activeTool !== 'select') {
-        onSelectTool('select');
-      }
     }
   };
 
