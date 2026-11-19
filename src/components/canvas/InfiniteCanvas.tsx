@@ -3334,6 +3334,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
    * CANVAS CLICK: Handles triple-click to spawn new Text Box on canvas
    */
   const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (inputSettings.threeClickTextBox === false) return;
+
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
 

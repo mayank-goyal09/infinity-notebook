@@ -331,6 +331,7 @@ export interface InputSettings {
   wheelMode: 'auto' | 'zoom' | 'pan';
   touchpadMode: 'auto' | 'touchpad' | 'mouse';
   inertialPan: boolean;
+  threeClickTextBox: boolean;
 }
 
 export type AppTheme = 'light' | 'dark' | 'paper';

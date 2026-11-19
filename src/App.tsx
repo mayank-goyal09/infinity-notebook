@@ -415,35 +415,24 @@ export default function App() {
 
 
   const [inputSettings, setInputSettings] = useState<InputSettings>(() => {
-
-    try {
-
-      const saved = localStorage.getItem('inf_input_settings_v2');
-
-      if (saved) return JSON.parse(saved);
-
-    } catch {}
-
-    return {
-
+    const defaultSettings: InputSettings = {
       smoothing: 0.65,
-
       lazyRope: false,
-
       lazyRopeLength: 20,
-
       velocityPressure: true,
-
       velocitySensitivity: 1.0,
-
       wheelMode: 'auto',
-
       touchpadMode: 'auto',
-
       inertialPan: true,
-
+      threeClickTextBox: true,
     };
 
+    try {
+      const saved = localStorage.getItem('inf_input_settings_v2');
+      if (saved) return { ...defaultSettings, ...JSON.parse(saved) };
+    } catch {}
+
+    return defaultSettings;
   });
 
 

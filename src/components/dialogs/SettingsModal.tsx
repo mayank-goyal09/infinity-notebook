@@ -290,6 +290,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
               </div>
 
+              <div className="flex items-center justify-between p-3 rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700">
+                <div>
+                  <div className="font-medium text-xs text-stone-800 dark:text-stone-200">
+                    Three-Click Text Box
+                  </div>
+                  <div className="text-[11px] text-stone-500">
+                    Triple-click anywhere on the canvas to spawn a new text box.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={inputSettings.threeClickTextBox ?? true}
+                  onChange={(e) => onUpdateInputSettings({ threeClickTextBox: e.target.checked })}
+                  className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                />
+              </div>
+
               <div>
                 <label className="text-xs font-semibold text-stone-600 dark:text-stone-400 block mb-1">
                   Mouse Wheel Mode
@@ -463,6 +480,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 { key: 'Ctrl + 2', desc: 'Fit Page Width' },
                 { key: 'Ctrl + 3', desc: 'Fit All Pages in Viewport' },
                 { key: 'Ctrl + Wheel', desc: 'Cursor-anchored Zoom' },
+                { key: 'Triple-Click', desc: 'Spawn new Text Box on canvas (toggle in settings)' },
               ].map((s) => (
                 <div
                   key={s.key}
